@@ -9,9 +9,10 @@ DASHBOARD_FILE="$SCRIPT_DIR/runtime/DASHBOARD.md"
 CYCLE_BRIEF_FILE="$SCRIPT_DIR/runtime/CYCLE-BRIEF.md"
 OPERATING_REVIEW_FILE="$SCRIPT_DIR/runtime/OPERATING-REVIEW.md"
 CEO_SESSION_REVIEW_FILE="$SCRIPT_DIR/runtime/CEO-SESSION-REVIEW.md"
+TEAM_ACTIVITY_FILE="$SCRIPT_DIR/runtime/TEAM-ACTIVITY-PLAN.md"
 
 if [ -f "$STATUS_FILE" ]; then
-  python3 - "$STATUS_FILE" "$PID_FILE" "$STOP_FILE" "$DASHBOARD_FILE" "$CYCLE_BRIEF_FILE" "$OPERATING_REVIEW_FILE" "$CEO_SESSION_REVIEW_FILE" <<'PY'
+  python3 - "$STATUS_FILE" "$PID_FILE" "$STOP_FILE" "$DASHBOARD_FILE" "$CYCLE_BRIEF_FILE" "$OPERATING_REVIEW_FILE" "$CEO_SESSION_REVIEW_FILE" "$TEAM_ACTIVITY_FILE" <<'PY'
 from datetime import datetime
 import json
 import sys
@@ -23,6 +24,7 @@ dashboard_path = sys.argv[4]
 cycle_brief_path = sys.argv[5]
 operating_review_path = sys.argv[6]
 ceo_session_review_path = sys.argv[7]
+team_activity_path = sys.argv[8]
 with open(path, encoding="utf-8") as handle:
     status = json.load(handle)
 
@@ -159,6 +161,7 @@ print(f"Dashboard   : {dashboard_path}")
 print(f"Cycle Brief : {cycle_brief_path}")
 print(f"Ops Review  : {operating_review_path}")
 print(f"CEO Review  : {ceo_session_review_path}")
+print(f"Team Plan   : {team_activity_path}")
 PY
 else
   if [ -f "$PID_FILE" ]; then

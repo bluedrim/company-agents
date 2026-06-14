@@ -18,17 +18,19 @@
 - `company-agents/runtime/CYCLE-BRIEF.md`: CEO/COO가 바로 볼 수 있는 이번 사이클 운영 브리프
 - `company-agents/runtime/OPERATING-REVIEW.md`: 운영 게이트, 승인 필요사항, 다음 세션 지시
 - `company-agents/runtime/CEO-SESSION-REVIEW.md`: CEO의 팀별 평가와 다음 세션 지시
+- `company-agents/runtime/TEAM-ACTIVITY-PLAN.md`: 팀별 선제 행동, 협업 요청, 에스컬레이션, 다음 액션
 - `company-agents/runtime/TOOL-USAGE.md`: 업무별 추천 도구 리포트
 - `company-agents/runtime/tool-usage.json`: 업무별 추천 도구 JSON
 - `company-agents/runtime/TOOL-AUDIT.md`: 도구 커버리지, 미사용 도구, 추천 품질 리포트
 - `company-agents/runtime/agent-logs/`: 에이전트별 heartbeat 로그
 - `company-agents/runtime/work-products/{team}/{agent}.md`: 팀별로 정리된 최신 작업 산출물
 
-`runtime/status.json`, `runtime/DASHBOARD.md`, `runtime/CYCLE-BRIEF.md`, `runtime/OPERATING-REVIEW.md`, `runtime/CEO-SESSION-REVIEW.md`, `runtime/agent-logs/`, `runtime/work-products/`는 최신 실행을 가리키는 latest 출력입니다.
+`runtime/status.json`, `runtime/DASHBOARD.md`, `runtime/CYCLE-BRIEF.md`, `runtime/OPERATING-REVIEW.md`, `runtime/CEO-SESSION-REVIEW.md`, `runtime/TEAM-ACTIVITY-PLAN.md`, `runtime/agent-logs/`, `runtime/work-products/`는 최신 실행을 가리키는 latest 출력입니다.
 실행 이력은 `runtime/outputs/session-###/` 아래에 보존됩니다.
 각 새 세션은 직전 세션의 `status.json`과 `CYCLE-BRIEF.md`를 읽고, 이전 결과를 개선하는 컨텍스트로 agent prompt에 포함합니다.
 이전 세션이 없으면 `session_mode=initial`, 이전 세션이 있으면 `session_mode=continue`로 상태와 콘솔에 표시됩니다.
 직전 세션의 `CEO-SESSION-REVIEW.md`도 함께 읽어 각 팀이 CEO 평가와 다음 지시를 반영합니다.
+직전 세션의 `TEAM-ACTIVITY-PLAN.md`도 함께 읽어 각 팀이 수동 대기하지 않고 선제 행동을 이어갑니다.
 직전 세션의 `work-products/{team}/` 산출물도 함께 발췌해 prompt에 넣습니다. Agent는 필요한 산출물을 발전시키고, 더 이상 필요하지 않은 산출물은 사용하지 않아도 됩니다.
 
 ## 사용자 최초 task 입력

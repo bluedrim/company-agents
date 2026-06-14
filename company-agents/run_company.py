@@ -35,6 +35,7 @@ DASHBOARD_FILE = RUNTIME_DIR / "DASHBOARD.md"
 CYCLE_BRIEF_FILE = RUNTIME_DIR / "CYCLE-BRIEF.md"
 OPERATING_REVIEW_FILE = RUNTIME_DIR / "OPERATING-REVIEW.md"
 CEO_SESSION_REVIEW_FILE = RUNTIME_DIR / "CEO-SESSION-REVIEW.md"
+TEAM_ACTIVITY_FILE = RUNTIME_DIR / "TEAM-ACTIVITY-PLAN.md"
 TOOL_USAGE_FILE = RUNTIME_DIR / "tool-usage.json"
 TOOL_USAGE_MD_FILE = RUNTIME_DIR / "TOOL-USAGE.md"
 TOOL_AUDIT_FILE = RUNTIME_DIR / "TOOL-AUDIT.md"
@@ -200,6 +201,10 @@ def previous_session_context(path: Path | None) -> str:
     if ceo_review:
         excerpt = "\n".join(ceo_review.splitlines()[:120])
         lines.extend(["", "Previous CEO Session Review:", excerpt])
+    team_activity = read_text(path / "TEAM-ACTIVITY-PLAN.md")
+    if team_activity:
+        excerpt = "\n".join(team_activity.splitlines()[:120])
+        lines.extend(["", "Previous Team Activity Plan:", excerpt])
     product_context = previous_team_products_context(path)
     if product_context:
         lines.extend(["", product_context])
@@ -1350,6 +1355,28 @@ def escape_csv(value: str) -> str:
     return value
 
 
+def proactive_team_mandate(agent: AgentRuntime, tasks: list[WorkItem]) -> str:
+    team = team_name_for_agent(agent)
+    lines = [
+        f"- Team: {team}",
+        "- 이번 세션에는 관찰만 하지 말고 최소 하나의 검토 가능한 산출물을 만들거나 기존 산출물을 개선하세요.",
+        "- 반드시 `do now`, `ask another team`, `escalate`, `next session` 네 가지 행동을 구분하세요.",
+        "- 다른 팀을 기다리는 일이 있으면 기다리지 말고 임시 가정, 필요한 입력, 요청 대상, 차단 해소 조건을 쓰세요.",
+        "- 팀 도구 중 하나를 선택해 산출물 또는 다음 액션과 연결하세요.",
+    ]
+    if tasks:
+        lines.append("- 직접 배정 업무가 있으므로 가장 빠르게 검토 가능한 초안을 우선 제출하세요.")
+    else:
+        lines.append("- 직접 배정 업무가 없어도 팀 플레이북 기준으로 리스크 제거, 의존성 정리, 산출물 개선 중 하나를 수행하세요.")
+    if agent.kind == "manager":
+        lines.append("- Manager는 팀원 2명 이상에게 다음 액션을 배정하고 상태 확인 기준을 써야 합니다.")
+    elif agent.kind == "staff":
+        lines.append("- Staff는 자신이 직접 만들 파일, 표, 체크리스트, 질문지, 분석 메모 중 하나를 명시해야 합니다.")
+    else:
+        lines.append("- Executive는 팀 간 충돌, 승인 필요사항, 하지 않을 일을 분명히 정해야 합니다.")
+    return "\n".join(lines)
+
+
 def build_agent_prompt(agent: AgentRuntime, tasks: list[WorkItem], cycle_id: str, previous_context: str = "") -> tuple[str, str]:
     task_lines = []
     for item in tasks:
@@ -1401,6 +1428,9 @@ def build_agent_prompt(agent: AgentRuntime, tasks: list[WorkItem], cycle_id: str
             "Assigned Work:",
             task_text,
             "",
+            "Proactive Team Activity Mandate:",
+            proactive_team_mandate(agent, tasks),
+            "",
             "Company Operating Discipline:",
             "- 모든 판단은 owner, due date, next action 중 최소 하나로 끝내세요.",
             "- KPI 또는 성공 지표에 어떤 영향을 주는지 명시하세요.",
@@ -1412,6 +1442,7 @@ def build_agent_prompt(agent: AgentRuntime, tasks: list[WorkItem], cycle_id: str
             "## 판단",
             "## 실행 계획",
             "## 산출물 초안",
+            "## Proactive Team Activity",
             "## KPI 영향",
             "## Decision Requests",
             "## Blockers",
@@ -1517,6 +1548,10 @@ def render_work_product(
         )
     lines.extend(
         [
+            "## Proactive Team Activity",
+            "",
+            proactive_team_mandate(agent, tasks),
+            "",
             "## LLM Work Product",
             "",
             llm_content,
@@ -1729,6 +1764,7 @@ def render_dashboard(status: dict[str, object]) -> str:
     lines.append(f"- Cycle Brief: {CYCLE_BRIEF_FILE.relative_to(ROOT)}")
     lines.append(f"- Operating Review: {OPERATING_REVIEW_FILE.relative_to(ROOT)}")
     lines.append(f"- CEO Session Review: {CEO_SESSION_REVIEW_FILE.relative_to(ROOT)}")
+    lines.append(f"- Team Activity Plan: {TEAM_ACTIVITY_FILE.relative_to(ROOT)}")
     lines.append(f"- Usage Report: {TOOL_USAGE_MD_FILE.relative_to(ROOT)}")
     lines.append(f"- Audit Report: {TOOL_AUDIT_FILE.relative_to(ROOT)}")
     for team in sorted(tool_recommendation_counts):
@@ -1861,6 +1897,7 @@ def render_cycle_brief(status: dict[str, object]) -> str:
             "- `./company-agents/run-agents --show-tool-audit`",
             f"- `sed -n '1,220p' {OPERATING_REVIEW_FILE.relative_to(ROOT)}`",
             f"- `sed -n '1,220p' {CEO_SESSION_REVIEW_FILE.relative_to(ROOT)}`",
+            f"- `sed -n '1,220p' {TEAM_ACTIVITY_FILE.relative_to(ROOT)}`",
         ]
     )
     return "\n".join(lines).rstrip() + "\n"
@@ -2154,6 +2191,139 @@ def render_ceo_session_review(status: dict[str, object]) -> str:
     return "\n".join(lines).rstrip() + "\n"
 
 
+def render_team_activity_plan(status: dict[str, object]) -> str:
+    agents = status.get("agents", [])
+    top_error = str(status.get("error") or "")
+    by_team: dict[str, dict[str, object]] = {}
+
+    if isinstance(agents, list):
+        for agent in agents:
+            if not isinstance(agent, dict):
+                continue
+            team = str(agent.get("parent") or "Company")
+            summary = by_team.setdefault(
+                team,
+                {
+                    "agents": 0,
+                    "tasks": 0,
+                    "failed": 0,
+                    "tools": 0,
+                    "owners": [],
+                    "actions": [],
+                    "asks": [],
+                },
+            )
+            summary["agents"] = int(summary["agents"]) + 1
+            summary["tasks"] = int(summary["tasks"]) + int(agent.get("task_count") or 0)
+            if agent.get("state") == "failed":
+                summary["failed"] = int(summary["failed"]) + 1
+            owners = summary["owners"]
+            if isinstance(owners, list):
+                owners.append(str(agent.get("name") or "unknown"))
+            recommendations = agent.get("recommended_tools", [])
+            if isinstance(recommendations, list):
+                summary["tools"] = int(summary["tools"]) + len(recommendations)
+            tasks = agent.get("tasks", [])
+            actions = summary["actions"]
+            asks = summary["asks"]
+            if isinstance(tasks, list):
+                for task in tasks[:4]:
+                    if not isinstance(task, dict):
+                        continue
+                    action = str(task.get("task") or "")
+                    dependency = str(task.get("dependency") or "")
+                    if action and isinstance(actions, list):
+                        actions.append(action)
+                    if dependency and dependency.lower() != "none" and isinstance(asks, list):
+                        asks.append(f"{task.get('owner') or agent.get('name')}: {dependency}")
+
+    if not by_team:
+        by_team["Company"] = {
+            "agents": int(status.get("agent_count") or 0),
+            "tasks": 0,
+            "failed": int(status.get("failed_agent_count") or 0),
+            "tools": 0,
+            "owners": [],
+            "actions": [],
+            "asks": [top_error] if top_error else [],
+        }
+
+    lines = [
+        "# Team Activity Plan",
+        "",
+        "각 팀이 다음 세션에서 더 적극적으로 움직이도록 CEO/COO 관점의 행동 계획을 정리합니다.",
+        "",
+        f"- Session: {status.get('session') or 'n/a'}",
+        f"- Cycle: {status.get('cycle_id')}",
+        f"- Generated At: {status.get('generated_at')}",
+        f"- Run Attention: {top_error or 'none'}",
+        "",
+        "## Activity Rules For Next Session",
+        "",
+        "- 모든 팀은 `do now`, `ask another team`, `escalate`, `next session`을 구분합니다.",
+        "- 직접 업무가 없어도 팀 플레이북 기준으로 산출물 개선, 리스크 제거, 의존성 정리 중 하나를 수행합니다.",
+        "- Manager는 팀원별 다음 액션을 재배정하고, Staff는 검토 가능한 산출물을 남깁니다.",
+        "- 실패한 팀은 범위를 넓히지 말고 실행 복구와 원인 기록을 먼저 합니다.",
+        "",
+        "## Team Activity Directives",
+        "",
+    ]
+
+    for team, summary in sorted(by_team.items(), key=lambda item: (-int(item[1]["tasks"]), item[0])):
+        tasks = int(summary["tasks"])
+        failed = int(summary["failed"])
+        tools = int(summary["tools"])
+        owners = summary["owners"]
+        actions = summary["actions"]
+        asks = summary["asks"]
+        lines.extend(
+            [
+                f"### {team}",
+                "",
+                f"- Activity Level: {'Recover First' if failed else ('High' if tasks else 'Needs Activation')}",
+                f"- Coverage: {summary['agents']} agent(s), {tasks} task(s), {tools} tool recommendation(s), {failed} failed",
+                f"- Active Owners: {', '.join(owners[:8]) if isinstance(owners, list) and owners else 'none recorded'}",
+                "",
+                "#### Do Now",
+                "",
+            ]
+        )
+        if failed:
+            lines.append("- Recover failed execution and produce a short recovery note before expanding scope.")
+        elif isinstance(actions, list) and actions:
+            for action in actions[:5]:
+                lines.append(f"- Advance: {action}")
+        else:
+            lines.append("- Pick one team playbook output and create or improve it in the next session.")
+
+        lines.extend(["", "#### Ask Another Team", ""])
+        if isinstance(asks, list) and asks:
+            for ask in asks[:5]:
+                lines.append(f"- Request input for: {ask}")
+        else:
+            lines.append("- Identify one dependency or useful review request for another team.")
+
+        lines.extend(["", "#### Escalate", ""])
+        if failed:
+            lines.append("- Escalate runtime/LLM failure to CEO Agent and CTO Agent.")
+        elif tools == 0:
+            lines.append("- Escalate missing tool usage or explain why no tool is needed.")
+        else:
+            lines.append("- Escalate only approval, legal, security, finance, or KPI gaps.")
+
+        lines.extend(
+            [
+                "",
+                "#### Next Session",
+                "",
+                "- Return with keep/change/add/drop decisions for this team's prior output.",
+                "",
+            ]
+        )
+
+    return "\n".join(lines).rstrip() + "\n"
+
+
 def write_status(status: dict[str, object], output_dir: Path | None = None) -> None:
     atomic_write_json(STATUS_FILE, status)
     render_tool_usage_reports(status)
@@ -2161,6 +2331,7 @@ def write_status(status: dict[str, object], output_dir: Path | None = None) -> N
     atomic_write_text(CYCLE_BRIEF_FILE, render_cycle_brief(status))
     atomic_write_text(OPERATING_REVIEW_FILE, render_operating_review(status))
     atomic_write_text(CEO_SESSION_REVIEW_FILE, render_ceo_session_review(status))
+    atomic_write_text(TEAM_ACTIVITY_FILE, render_team_activity_plan(status))
     if output_dir is not None:
         atomic_write_json(output_dir / "status.json", status)
         render_tool_usage_reports(
@@ -2173,6 +2344,7 @@ def write_status(status: dict[str, object], output_dir: Path | None = None) -> N
         atomic_write_text(output_dir / "CYCLE-BRIEF.md", render_cycle_brief(status))
         atomic_write_text(output_dir / "OPERATING-REVIEW.md", render_operating_review(status))
         atomic_write_text(output_dir / "CEO-SESSION-REVIEW.md", render_ceo_session_review(status))
+        atomic_write_text(output_dir / "TEAM-ACTIVITY-PLAN.md", render_team_activity_plan(status))
         write_session_index()
 
 
@@ -2425,6 +2597,7 @@ def render_console_report(status: dict[str, object]) -> str:
             f"Cycle Brief : {CYCLE_BRIEF_FILE.relative_to(ROOT)}",
             f"Ops Review  : {OPERATING_REVIEW_FILE.relative_to(ROOT)}",
             f"CEO Review  : {CEO_SESSION_REVIEW_FILE.relative_to(ROOT)}",
+            f"Team Plan   : {TEAM_ACTIVITY_FILE.relative_to(ROOT)}",
             f"Logs        : {LOG_DIR.relative_to(ROOT)}",
             f"Products    : {PRODUCT_DIR.relative_to(ROOT)}",
         ]

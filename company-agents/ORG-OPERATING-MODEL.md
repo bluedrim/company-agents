@@ -86,8 +86,8 @@
 - Owner: CEO Agent, COO Agent
 - 참석: Executive Layer, 모든 Manager
 - 목적: 이번 세션이 실제 회사처럼 운영됐는지 점검하고 다음 세션 mandate를 확정
-- 산출물: `runtime/OPERATING-REVIEW.md`, `runtime/CEO-SESSION-REVIEW.md`
-- 필수 확인: Health Score, Operating Gates, Executive Decisions Needed, Team Accountability, CEO Team Evaluations, Next Session CEO Directive
+- 산출물: `runtime/OPERATING-REVIEW.md`, `runtime/CEO-SESSION-REVIEW.md`, `runtime/TEAM-ACTIVITY-PLAN.md`
+- 필수 확인: Health Score, Operating Gates, Executive Decisions Needed, Team Accountability, CEO Team Evaluations, Team Activity Directives, Next Session CEO Directive
 
 ### Weekly Strategy Review
 

@@ -107,6 +107,30 @@ class CompanyAgentRunnerTests(unittest.TestCase):
             self.assertIn("Previous CEO Session Review", context)
             self.assertIn("Engineering Team", context)
 
+    def test_previous_session_context_reads_team_activity_plan(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            session_dir = Path(tmp)
+            run_company.atomic_write_json(session_dir / "status.json", {"cycle_id": "prior", "agent_count": 1})
+            run_company.atomic_write_text(
+                session_dir / "TEAM-ACTIVITY-PLAN.md",
+                "# Team Activity Plan\n\n## Team Activity Directives\n\n- Engineering Team은 do now를 정리한다.",
+            )
+            context = run_company.previous_session_context(session_dir)
+            self.assertIn("Previous Team Activity Plan", context)
+            self.assertIn("Engineering Team", context)
+
+    def test_build_agent_prompt_requires_proactive_activity(self):
+        agent = run_company.AgentRuntime(
+            name="Backend Engineer",
+            role_file=None,
+            kind="staff",
+            parent="Engineering Team",
+        )
+        _, prompt = run_company.build_agent_prompt(agent, [], "unit-test")
+        self.assertIn("Proactive Team Activity Mandate", prompt)
+        self.assertIn("do now", prompt)
+        self.assertIn("## Proactive Team Activity", prompt)
+
     def test_operating_review_renders_governance_gates(self):
         status = {
             "session": "session-001",
@@ -158,6 +182,28 @@ class CompanyAgentRunnerTests(unittest.TestCase):
         self.assertIn("CEO Rating", review)
         self.assertIn("Next Session CEO Directive", review)
 
+    def test_team_activity_plan_renders_active_directives(self):
+        status = {
+            "session": "session-001",
+            "cycle_id": "unit-test",
+            "generated_at": "2026-06-12T00:00:00+09:00",
+            "agents": [
+                {
+                    "name": "Backend Engineer",
+                    "parent": "Engineering Team",
+                    "state": "active",
+                    "task_count": 1,
+                    "tasks": [{"owner": "Backend Engineer", "task": "API와 데이터 모델 후보 정리", "dependency": "CPO scope"}],
+                    "recommended_tools": [{"tool": "Architecture Decision Record"}],
+                }
+            ],
+        }
+        plan = run_company.render_team_activity_plan(status)
+        self.assertIn("# Team Activity Plan", plan)
+        self.assertIn("Engineering Team", plan)
+        self.assertIn("Do Now", plan)
+        self.assertIn("Ask Another Team", plan)
+
     def test_filtered_cycle_exits_when_llm_is_disabled(self):
         with self.assertRaises(run_company.LLMConnectionError):
             run_company.run_cycle(max_workers=2, cycle_id="self-test", agent_filter="CEO")
@@ -178,10 +224,12 @@ class CompanyAgentRunnerTests(unittest.TestCase):
         self.assertTrue((output_dir / "CYCLE-BRIEF.md").exists())
         self.assertTrue((output_dir / "OPERATING-REVIEW.md").exists())
         self.assertTrue((output_dir / "CEO-SESSION-REVIEW.md").exists())
+        self.assertTrue((output_dir / "TEAM-ACTIVITY-PLAN.md").exists())
         self.assertTrue((run_company.OUTPUTS_DIR / "SESSION-INDEX.md").exists())
         self.assertTrue(run_company.CYCLE_BRIEF_FILE.exists())
         self.assertTrue(run_company.OPERATING_REVIEW_FILE.exists())
         self.assertTrue(run_company.CEO_SESSION_REVIEW_FILE.exists())
+        self.assertTrue(run_company.TEAM_ACTIVITY_FILE.exists())
         cycle_brief = run_company.read_text(run_company.CYCLE_BRIEF_FILE)
         self.assertIn("# Cycle Brief", cycle_brief)
         self.assertIn("- Session Mode:", cycle_brief)
@@ -192,6 +240,9 @@ class CompanyAgentRunnerTests(unittest.TestCase):
         ceo_review = run_company.read_text(run_company.CEO_SESSION_REVIEW_FILE)
         self.assertIn("# CEO Session Review", ceo_review)
         self.assertIn("CEO Team Evaluations", ceo_review)
+        team_plan = run_company.read_text(run_company.TEAM_ACTIVITY_FILE)
+        self.assertIn("# Team Activity Plan", team_plan)
+        self.assertIn("Activity Rules For Next Session", team_plan)
 
     def test_run_agent_requires_llm_content(self):
         agent = run_company.AgentRuntime(name="CEO Agent", role_file="CEO-Agent.md", kind="executive")
