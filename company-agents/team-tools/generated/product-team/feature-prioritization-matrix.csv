@@ -1,0 +1,2 @@
+id,title,status,owner,priority,due_date,source,dependency,next_action,last_updated,notes
+1,Feature Prioritization Matrix,Backlog,,Medium,,"기능을 가치, 난이도, 리스크로 평가",,기능 우선순위표,2026-05-30T11:28:04+09:00,

@@ -1,0 +1,2 @@
+id,title,status,owner,priority,due_date,source,dependency,next_action,last_updated,notes
+1,Blocker Log,Backlog,,Medium,,"막힌 업무의 원인, 결정권자, 다음 확인 시간을 추적",,병목 로그,2026-05-30T11:28:04+09:00,

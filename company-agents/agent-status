@@ -1,0 +1,171 @@
+#!/usr/bin/env sh
+set -eu
+
+SCRIPT_DIR=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
+PID_FILE="$SCRIPT_DIR/runtime/company-agents.pid"
+STATUS_FILE="$SCRIPT_DIR/runtime/status.json"
+STOP_FILE="$SCRIPT_DIR/runtime/stop.requested"
+DASHBOARD_FILE="$SCRIPT_DIR/runtime/DASHBOARD.md"
+CYCLE_BRIEF_FILE="$SCRIPT_DIR/runtime/CYCLE-BRIEF.md"
+OPERATING_REVIEW_FILE="$SCRIPT_DIR/runtime/OPERATING-REVIEW.md"
+CEO_SESSION_REVIEW_FILE="$SCRIPT_DIR/runtime/CEO-SESSION-REVIEW.md"
+
+if [ -f "$STATUS_FILE" ]; then
+  python3 - "$STATUS_FILE" "$PID_FILE" "$STOP_FILE" "$DASHBOARD_FILE" "$CYCLE_BRIEF_FILE" "$OPERATING_REVIEW_FILE" "$CEO_SESSION_REVIEW_FILE" <<'PY'
+from datetime import datetime
+import json
+import sys
+
+path = sys.argv[1]
+pid_path = sys.argv[2]
+stop_path = sys.argv[3]
+dashboard_path = sys.argv[4]
+cycle_brief_path = sys.argv[5]
+operating_review_path = sys.argv[6]
+ceo_session_review_path = sys.argv[7]
+with open(path, encoding="utf-8") as handle:
+    status = json.load(handle)
+
+generated_at = status.get("generated_at")
+age = None
+if generated_at:
+    try:
+        generated = datetime.fromisoformat(generated_at)
+        age = (datetime.now(generated.tzinfo) - generated).total_seconds()
+    except ValueError:
+        age = None
+
+pid = None
+try:
+    with open(pid_path, encoding="utf-8") as handle:
+        pid = handle.read().strip()
+except FileNotFoundError:
+    pass
+
+stop_requested = False
+try:
+    with open(stop_path, encoding="utf-8"):
+        stop_requested = True
+except FileNotFoundError:
+    pass
+
+if stop_requested:
+    process = "stop requested"
+elif pid and age is not None and age <= 120:
+    process = "running"
+elif age is not None and age <= 120:
+    process = "recently ran"
+elif pid:
+    process = "unknown"
+else:
+    process = "not running"
+
+llm = status.get("llm") or {}
+error = status.get("error") or llm.get("error") or ""
+failed = int(status.get("failed_agent_count") or 0)
+state = "FAILED" if error or failed else "OK"
+session = str(status.get("session") or "n/a")
+pid_text = f" pid={pid}" if pid else ""
+age_text = f" age={int(age)}s" if age is not None else ""
+
+def blue(value):
+    return f"\033[34m{value}\033[0m"
+
+def session_activity_lines(status):
+    agents = status.get("agents") or []
+    if not isinstance(agents, list) or not agents:
+        return ["No agent activity recorded for this session."]
+    connected = 0
+    failed_count = 0
+    assigned_tasks = 0
+    tool_recommendations = 0
+    active_names = []
+    failed_names = []
+    for item in agents:
+        if not isinstance(item, dict):
+            continue
+        name = str(item.get("name") or "unknown")
+        state_value = str(item.get("state") or "")
+        if item.get("llm") == "connected":
+            connected += 1
+        if state_value == "failed":
+            failed_count += 1
+            failed_names.append(name)
+        else:
+            active_names.append(name)
+        assigned_tasks += int(item.get("task_count") or 0)
+        recommendations = item.get("recommended_tools") or []
+        if isinstance(recommendations, list):
+            tool_recommendations += len(recommendations)
+    lines = [
+        f"Agents Run  : {len(agents)}",
+        f"Connected   : {connected}",
+        f"Failed      : {failed_count}",
+        f"Tasks       : {assigned_tasks}",
+        f"Tool Uses   : {tool_recommendations}",
+    ]
+    if active_names:
+        lines.append("Active      : " + ", ".join(active_names[:5]) + (" ..." if len(active_names) > 5 else ""))
+    if failed_names:
+        lines.append("Failed List : " + ", ".join(failed_names[:5]) + (" ..." if len(failed_names) > 5 else ""))
+    return lines
+
+print()
+print(blue(f"Session {session}"))
+print("Company Agents Status")
+print("=====================")
+print(f"Process     : {process}{pid_text}{age_text}")
+print(f"State       : {state}")
+print(f"Session     : {session}")
+print(f"Mode        : {status.get('session_mode') or 'unknown'}")
+print(f"Cycle       : {status.get('cycle_id')}")
+print(f"Generated   : {status.get('generated_at')}")
+print(f"Output      : {status.get('output_dir') or 'runtime latest only'}")
+print(f"Previous    : {status.get('previous_output_dir') or 'none'}")
+print()
+print("LLM")
+print("---")
+print(f"Provider    : {llm.get('provider')}")
+print(f"Model       : {llm.get('model')}")
+print(f"Base URL    : {llm.get('base_url')}")
+print(f"Connected   : {llm.get('connected_count')}")
+if llm.get("error"):
+    print(f"LLM Error   : {llm.get('error')}")
+print()
+print("Work")
+print("----")
+print(f"Agents      : {status.get('agent_count')}")
+print(f"Failed      : {failed}")
+print(f"Work Items  : {status.get('work_item_count')}")
+teams = status.get("teams") or {}
+if isinstance(teams, dict) and teams:
+    top = sorted(teams.items(), key=lambda item: (-int(item[1]), str(item[0])))[:5]
+    print("Top Teams   : " + ", ".join(f"{team}={count}" for team, count in top))
+print()
+print("Current Session Activity")
+print("------------------------")
+for line in session_activity_lines(status):
+    print(line)
+if error:
+    print()
+    print("Failure")
+    print("-------")
+    print(error)
+print()
+print("Files")
+print("-----")
+print(f"Status      : {path}")
+print(f"Dashboard   : {dashboard_path}")
+print(f"Cycle Brief : {cycle_brief_path}")
+print(f"Ops Review  : {operating_review_path}")
+print(f"CEO Review  : {ceo_session_review_path}")
+PY
+else
+  if [ -f "$PID_FILE" ]; then
+    PID=$(cat "$PID_FILE")
+    echo "Process: unknown pid=$PID"
+  else
+    echo "Process: not running"
+  fi
+  echo "Status: not generated yet"
+fi

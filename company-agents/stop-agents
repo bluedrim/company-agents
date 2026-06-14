@@ -1,0 +1,19 @@
+#!/usr/bin/env sh
+set -eu
+
+SCRIPT_DIR=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
+RUNTIME_DIR="$SCRIPT_DIR/runtime"
+PID_FILE="$SCRIPT_DIR/runtime/company-agents.pid"
+STOP_FILE="$RUNTIME_DIR/stop.requested"
+
+mkdir -p "$RUNTIME_DIR"
+touch "$STOP_FILE"
+
+if [ -f "$PID_FILE" ]; then
+  PID=$(cat "$PID_FILE")
+  kill "$PID" 2>/dev/null || true
+  rm -f "$PID_FILE"
+  echo "Stop requested for company agents pid $PID"
+else
+  echo "Stop requested for company agents."
+fi

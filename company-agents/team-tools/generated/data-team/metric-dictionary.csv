@@ -1,0 +1,2 @@
+id,title,status,owner,priority,due_date,source,dependency,next_action,last_updated,notes
+1,Metric Dictionary,Backlog,,Medium,,"지표 정의, owner, source를 관리",,지표 사전,2026-05-30T11:28:04+09:00,

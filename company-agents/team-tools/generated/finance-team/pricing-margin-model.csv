@@ -1,0 +1,2 @@
+id,title,status,owner,priority,due_date,source,dependency,next_action,last_updated,notes
+1,Pricing Margin Model,Backlog,,Medium,,"가격, 원가, 할인 조건별 margin을 비교",,수익성 분석표,2026-05-30T11:28:04+09:00,

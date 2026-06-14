@@ -1,0 +1,6 @@
+company-agents/.env
+company-agents/runtime/
+.DS_Store
+company-agents/.DS_Store
+__pycache__/
+company-agents/__pycache__/

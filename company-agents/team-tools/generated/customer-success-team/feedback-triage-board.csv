@@ -1,0 +1,2 @@
+id,title,status,owner,priority,due_date,source,dependency,next_action,last_updated,notes
+1,Feedback Triage Board,Backlog,,Medium,,"피드백을 버그, 기능 요청, 교육 이슈로 분류",,피드백 보드,2026-05-30T11:28:04+09:00,

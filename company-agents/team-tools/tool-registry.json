@@ -1,0 +1,87 @@
+{
+  "Company Layer": [
+    {"name": "CEO Decision Log", "type": "Decision log", "template": "generic-decision-brief.md"},
+    {"name": "Company North Star Dashboard", "type": "Dashboard", "template": "generic-register.csv"},
+    {"name": "Strategic Priority Matrix", "type": "Prioritization matrix", "template": "generic-register.csv"}
+  ],
+  "Executive Team": [
+    {"name": "Directive Intake Form", "type": "Intake template", "template": "tool-template.md"},
+    {"name": "Decision Brief Template", "type": "Brief template", "template": "generic-decision-brief.md"},
+    {"name": "Priority Conflict Resolver", "type": "Review checklist", "template": "generic-review-checklist.md"}
+  ],
+  "Operations Team": [
+    {"name": "Task Intake Queue", "type": "Work queue", "template": "generic-register.csv"},
+    {"name": "Blocker Log", "type": "Risk log", "template": "generic-register.csv"},
+    {"name": "Process Checklist Builder", "type": "Template builder", "template": "generic-review-checklist.md"}
+  ],
+  "Finance Team": [
+    {"name": "Monthly Budget Sheet", "type": "Spreadsheet template", "template": "generic-register.csv"},
+    {"name": "Burn Rate Calculator", "type": "Calculator", "template": "tool-template.md"},
+    {"name": "Pricing Margin Model", "type": "Financial model", "template": "generic-register.csv"}
+  ],
+  "Product Team": [
+    {"name": "PRD Template", "type": "Product spec", "template": "tool-template.md"},
+    {"name": "Feature Prioritization Matrix", "type": "Prioritization matrix", "template": "generic-register.csv"},
+    {"name": "User Interview Kit", "type": "Research kit", "template": "tool-template.md"}
+  ],
+  "Engineering Team": [
+    {"name": "Architecture Decision Record", "type": "Decision log", "template": "generic-decision-brief.md"},
+    {"name": "Release Checklist", "type": "Release checklist", "template": "generic-review-checklist.md"},
+    {"name": "Bug Triage Board", "type": "Triage board", "template": "generic-register.csv"}
+  ],
+  "Marketing Team": [
+    {"name": "Campaign Experiment Planner", "type": "Experiment template", "template": "tool-template.md"},
+    {"name": "Content Calendar", "type": "Calendar", "template": "generic-register.csv"},
+    {"name": "Message Testing Matrix", "type": "Testing matrix", "template": "generic-register.csv"}
+  ],
+  "Sales Team": [
+    {"name": "CRM Pipeline Board", "type": "Pipeline board", "template": "generic-register.csv"},
+    {"name": "Discovery Call Script", "type": "Script", "template": "tool-template.md"},
+    {"name": "Objection Log", "type": "Feedback log", "template": "generic-register.csv"}
+  ],
+  "Customer Success Team": [
+    {"name": "Onboarding Tracker", "type": "Tracker", "template": "generic-register.csv"},
+    {"name": "Health Scorecard", "type": "Scorecard", "template": "generic-register.csv"},
+    {"name": "Feedback Triage Board", "type": "Triage board", "template": "generic-register.csv"}
+  ],
+  "People Team": [
+    {"name": "Role Scorecard", "type": "Role template", "template": "tool-template.md"},
+    {"name": "Hiring Pipeline Tracker", "type": "Pipeline tracker", "template": "generic-register.csv"},
+    {"name": "Onboarding Plan Builder", "type": "Plan template", "template": "tool-template.md"}
+  ],
+  "Legal and Compliance Team": [
+    {"name": "Contract Review Checklist", "type": "Review checklist", "template": "generic-review-checklist.md"},
+    {"name": "Privacy Impact Assessment", "type": "Risk assessment", "template": "generic-review-checklist.md"},
+    {"name": "Clause Library", "type": "Reference library", "template": "generic-register.csv"}
+  ],
+  "Data Team": [
+    {"name": "Metric Dictionary", "type": "Data dictionary", "template": "generic-register.csv"},
+    {"name": "Experiment Readout Template", "type": "Analysis template", "template": "tool-template.md"},
+    {"name": "Data Quality Monitor", "type": "Quality checklist", "template": "generic-review-checklist.md"}
+  ],
+  "Strategy and Research Team": [
+    {"name": "Market Attractiveness Matrix", "type": "Strategy matrix", "template": "generic-register.csv"},
+    {"name": "Competitive Battlecard", "type": "Competitive brief", "template": "tool-template.md"},
+    {"name": "Strategic Bet Register", "type": "Bet register", "template": "generic-register.csv"}
+  ],
+  "Partnerships and Business Development Team": [
+    {"name": "Partner Pipeline Board", "type": "Pipeline board", "template": "generic-register.csv"},
+    {"name": "Partner Fit Scorecard", "type": "Scorecard", "template": "generic-register.csv"},
+    {"name": "Co-Marketing Plan Template", "type": "Plan template", "template": "tool-template.md"}
+  ],
+  "Security and Risk Team": [
+    {"name": "Risk Register", "type": "Risk register", "template": "generic-register.csv"},
+    {"name": "Security Review Checklist", "type": "Review checklist", "template": "generic-review-checklist.md"},
+    {"name": "Incident Response Runbook", "type": "Runbook", "template": "tool-template.md"}
+  ],
+  "Internal Systems and IT Team": [
+    {"name": "Access Request Form", "type": "Request form", "template": "tool-template.md"},
+    {"name": "Automation Backlog", "type": "Backlog", "template": "generic-register.csv"},
+    {"name": "Knowledge Base Index", "type": "Index", "template": "generic-register.csv"}
+  ],
+  "Procurement and Vendor Management Team": [
+    {"name": "Vendor Register", "type": "Vendor register", "template": "generic-register.csv"},
+    {"name": "Purchase Request Form", "type": "Request form", "template": "tool-template.md"},
+    {"name": "Outsourcing RFP Template", "type": "RFP template", "template": "tool-template.md"}
+  ]
+}

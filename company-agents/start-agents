@@ -1,0 +1,26 @@
+#!/usr/bin/env sh
+set -eu
+
+SCRIPT_DIR=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
+RUNTIME_DIR="$SCRIPT_DIR/runtime"
+PID_FILE="$RUNTIME_DIR/company-agents.pid"
+OUT_FILE="$RUNTIME_DIR/company-agents.out"
+STOP_FILE="$RUNTIME_DIR/stop.requested"
+INTERVAL="${1:-60}"
+
+mkdir -p "$RUNTIME_DIR"
+rm -f "$STOP_FILE"
+
+if [ -f "$PID_FILE" ]; then
+  PID=$(cat "$PID_FILE")
+  if kill -0 "$PID" 2>/dev/null; then
+    echo "Company agents already running with pid $PID"
+    exit 0
+  fi
+fi
+
+nohup "$SCRIPT_DIR/run-agents" --watch --interval "$INTERVAL" > "$OUT_FILE" 2>&1 &
+PID=$!
+echo "$PID" > "$PID_FILE"
+echo "Started company agents with pid $PID"
+echo "Output: $OUT_FILE"
