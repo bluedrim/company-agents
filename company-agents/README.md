@@ -59,8 +59,9 @@
 각 팀의 산출물은 `runtime/outputs/session-###/work-products/{team}/{agent}.md`와 최신 mirror인 `runtime/work-products/{team}/{agent}.md`에 저장된다.
 세션 종료 시 `CEO-SESSION-REVIEW.md`에 CEO의 팀별 평가와 다음 세션 지시를 따로 남긴다.
 `TEAM-ACTIVITY-PLAN.md`는 각 팀이 다음 세션에서 바로 해야 할 일, 다른 팀에 요청할 일, 에스컬레이션할 일, 다음 세션까지 남길 일을 구분한다.
+`TEAM-SESSION-RESULTS.md`는 이번 세션에서 각 팀이 남긴 결과물만 따로 모아 보여준다.
 다음 세션은 직전 세션의 팀별 산출물, CEO 세션 리뷰, 팀 활동 계획을 읽고 필요한 것은 발전시키며, 더 이상 필요하지 않은 산출물은 사용하지 않아도 된다는 지시를 agent prompt에 포함한다.
-각 실행은 `runtime/DASHBOARD.md`, `runtime/CYCLE-BRIEF.md`, `runtime/OPERATING-REVIEW.md`, `runtime/CEO-SESSION-REVIEW.md`, `runtime/TEAM-ACTIVITY-PLAN.md`를 함께 만들어 운영자가 팀별 업무량, 실패 agent, 승인 필요사항, CEO 평가, 다음 세션 지시를 빠르게 확인할 수 있게 한다.
+각 실행은 `runtime/DASHBOARD.md`, `runtime/CYCLE-BRIEF.md`, `runtime/OPERATING-REVIEW.md`, `runtime/CEO-SESSION-REVIEW.md`, `runtime/TEAM-ACTIVITY-PLAN.md`, `runtime/TEAM-SESSION-RESULTS.md`를 함께 만들어 운영자가 팀별 업무량, 결과물, 실패 agent, 승인 필요사항, CEO 평가, 다음 세션 지시를 빠르게 확인할 수 있게 한다.
 LLM 연결은 필수이며, 연결되지 않으면 이유를 출력하고 실행을 종료한다.
 LLM 설정은 `company-agents/.env`에서 관리하며, Ollama, OpenAI-compatible `gpt_oss`, `chatgpt_oauth` bearer token provider를 사용할 수 있다.
 최초 CEO task를 사용자 입력으로 시작하려면 아래처럼 실행한다.

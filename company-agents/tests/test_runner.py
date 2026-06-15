@@ -204,6 +204,32 @@ class CompanyAgentRunnerTests(unittest.TestCase):
         self.assertIn("Do Now", plan)
         self.assertIn("Ask Another Team", plan)
 
+    def test_team_session_results_renders_team_outputs_only(self):
+        status = {
+            "session": "session-001",
+            "cycle_id": "unit-test",
+            "generated_at": "2026-06-12T00:00:00+09:00",
+            "output_dir": "runtime/outputs/session-001",
+            "agents": [
+                {
+                    "name": "Backend Engineer",
+                    "parent": "Engineering Team",
+                    "state": "active",
+                    "task_count": 1,
+                    "work_product": "runtime/outputs/session-001/work-products/engineering-team/backend-engineer.md",
+                    "log": "runtime/outputs/session-001/agent-logs/backend-engineer.md",
+                    "tasks": [{"status": "Ready", "task": "API와 데이터 모델 후보 정리", "due": "Day 3", "dependency": "CPO scope"}],
+                    "recommended_tools": [{"tool": "Architecture Decision Record", "type": "Decision log"}],
+                }
+            ],
+        }
+        results = run_company.render_team_session_results(status)
+        self.assertIn("# Team Session Results", results)
+        self.assertIn("Engineering Team", results)
+        self.assertIn("Backend Engineer", results)
+        self.assertIn("Work Product:", results)
+        self.assertIn("API와 데이터 모델 후보 정리", results)
+
     def test_filtered_cycle_exits_when_llm_is_disabled(self):
         with self.assertRaises(run_company.LLMConnectionError):
             run_company.run_cycle(max_workers=2, cycle_id="self-test", agent_filter="CEO")
@@ -225,11 +251,13 @@ class CompanyAgentRunnerTests(unittest.TestCase):
         self.assertTrue((output_dir / "OPERATING-REVIEW.md").exists())
         self.assertTrue((output_dir / "CEO-SESSION-REVIEW.md").exists())
         self.assertTrue((output_dir / "TEAM-ACTIVITY-PLAN.md").exists())
+        self.assertTrue((output_dir / "TEAM-SESSION-RESULTS.md").exists())
         self.assertTrue((run_company.OUTPUTS_DIR / "SESSION-INDEX.md").exists())
         self.assertTrue(run_company.CYCLE_BRIEF_FILE.exists())
         self.assertTrue(run_company.OPERATING_REVIEW_FILE.exists())
         self.assertTrue(run_company.CEO_SESSION_REVIEW_FILE.exists())
         self.assertTrue(run_company.TEAM_ACTIVITY_FILE.exists())
+        self.assertTrue(run_company.TEAM_SESSION_RESULTS_FILE.exists())
         cycle_brief = run_company.read_text(run_company.CYCLE_BRIEF_FILE)
         self.assertIn("# Cycle Brief", cycle_brief)
         self.assertIn("- Session Mode:", cycle_brief)
@@ -243,6 +271,9 @@ class CompanyAgentRunnerTests(unittest.TestCase):
         team_plan = run_company.read_text(run_company.TEAM_ACTIVITY_FILE)
         self.assertIn("# Team Activity Plan", team_plan)
         self.assertIn("Activity Rules For Next Session", team_plan)
+        team_results = run_company.read_text(run_company.TEAM_SESSION_RESULTS_FILE)
+        self.assertIn("# Team Session Results", team_results)
+        self.assertIn("Team Result Index", team_results)
 
     def test_run_agent_requires_llm_content(self):
         agent = run_company.AgentRuntime(name="CEO Agent", role_file="CEO-Agent.md", kind="executive")
