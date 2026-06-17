@@ -29,6 +29,7 @@ RUNTIME_DIR = ROOT / "runtime"
 OUTPUTS_DIR = RUNTIME_DIR / "outputs"
 LOG_DIR = RUNTIME_DIR / "agent-logs"
 PRODUCT_DIR = RUNTIME_DIR / "work-products"
+TEAM_RESULT_DIR = RUNTIME_DIR / "team-results"
 STATUS_FILE = RUNTIME_DIR / "status.json"
 STOP_FILE = RUNTIME_DIR / "stop.requested"
 DASHBOARD_FILE = RUNTIME_DIR / "DASHBOARD.md"
@@ -1438,6 +1439,7 @@ def build_agent_prompt(agent: AgentRuntime, tasks: list[WorkItem], cycle_id: str
             "- CEO/CFO/Legal/Security 승인이 필요한 항목은 Decision Request로 분리하세요.",
             "- Blocker, dependency, risk는 각각 owner와 해소 조건을 붙이세요.",
             "- 다음 세션에서 발전시킬 산출물과 폐기해도 되는 산출물을 구분하세요.",
+            "- 예시나 빈 템플릿만 제출하지 말고, 이번 세션 기준의 실제 내용으로 표, 목록, 기준, 초안, 결정 요청을 채우세요.",
             "",
             "Write the agent's work product with these sections:",
             "## 판단",
@@ -1767,6 +1769,7 @@ def render_dashboard(status: dict[str, object]) -> str:
     lines.append(f"- CEO Session Review: {CEO_SESSION_REVIEW_FILE.relative_to(ROOT)}")
     lines.append(f"- Team Activity Plan: {TEAM_ACTIVITY_FILE.relative_to(ROOT)}")
     lines.append(f"- Team Session Results: {TEAM_SESSION_RESULTS_FILE.relative_to(ROOT)}")
+    lines.append(f"- Team Result Documents: {TEAM_RESULT_DIR.relative_to(ROOT)}")
     lines.append(f"- Usage Report: {TOOL_USAGE_MD_FILE.relative_to(ROOT)}")
     lines.append(f"- Audit Report: {TOOL_AUDIT_FILE.relative_to(ROOT)}")
     for team in sorted(tool_recommendation_counts):
@@ -2327,6 +2330,19 @@ def render_team_activity_plan(status: dict[str, object]) -> str:
     return "\n".join(lines).rstrip() + "\n"
 
 
+def read_result_content(path_text: str, max_lines: int = 140) -> str:
+    if not path_text:
+        return ""
+    path = ROOT / path_text
+    if not path.exists() or not path.is_file():
+        return ""
+    lines = read_text(path).splitlines()
+    excerpt = "\n".join(lines[:max_lines]).strip()
+    if len(lines) > max_lines:
+        excerpt += f"\n\n...truncated after {max_lines} lines..."
+    return excerpt
+
+
 def render_team_session_results(status: dict[str, object]) -> str:
     agents = status.get("agents", [])
     by_team: dict[str, list[dict[str, object]]] = {}
@@ -2360,6 +2376,17 @@ def render_team_session_results(status: dict[str, object]) -> str:
         lines.append("| None | 0 | 0 | 0 | 0 |")
 
     lines.extend(["", "## Team Results", ""])
+    if not by_team:
+        lines.extend(
+            [
+                "### No Agent Results",
+                "",
+                "#### Result Content",
+                "",
+                "- No team result content was produced because no agent reached execution.",
+                "",
+            ]
+        )
     for team, team_agents in sorted(by_team.items()):
         lines.extend([f"### {team}", ""])
         for agent in sorted(team_agents, key=lambda item: str(item.get("name") or "")):
@@ -2406,8 +2433,85 @@ def render_team_session_results(status: dict[str, object]) -> str:
             error = agent.get("error") or agent.get("llm_error")
             if error:
                 lines.extend(["", "##### Failure", "", f"- {error}"])
+            result_content = read_result_content(product)
+            lines.extend(["", "##### Result Content", ""])
+            if result_content:
+                lines.extend(["```markdown", result_content, "```"])
+            else:
+                lines.append("- No work product content available for this session.")
             lines.append("")
     return "\n".join(lines).rstrip() + "\n"
+
+
+def render_single_team_result(status: dict[str, object], team: str, team_agents: list[dict[str, object]]) -> str:
+    lines = [
+        f"# {team} Session Result",
+        "",
+        "이번 세션에서 이 팀이 실제로 남긴 결과물 본문을 모은 문서입니다.",
+        "",
+        f"- Session: {status.get('session') or 'n/a'}",
+        f"- Cycle: {status.get('cycle_id')}",
+        f"- Generated At: {status.get('generated_at')}",
+        "",
+        "## Team Summary",
+        "",
+        f"- Agents: {len(team_agents)}",
+        f"- Tasks: {sum(int(agent.get('task_count') or 0) for agent in team_agents)}",
+        f"- Failed: {sum(1 for agent in team_agents if agent.get('state') == 'failed')}",
+        "",
+        "## Results By Agent",
+        "",
+    ]
+    for agent in sorted(team_agents, key=lambda item: str(item.get("name") or "")):
+        name = str(agent.get("name") or "unknown")
+        product = str(agent.get("work_product") or "")
+        result_content = read_result_content(product, max_lines=180)
+        lines.extend(
+            [
+                f"### {name}",
+                "",
+                f"- State: {agent.get('state') or 'unknown'}",
+                f"- Work Product: {product or 'none'}",
+                "",
+                "#### Actual Result",
+                "",
+            ]
+        )
+        if result_content:
+            lines.extend(["```markdown", result_content, "```"])
+        else:
+            lines.append("- No work product content available for this session.")
+        error = agent.get("error") or agent.get("llm_error")
+        if error:
+            lines.extend(["", "#### Failure", "", f"- {error}"])
+        lines.append("")
+    return "\n".join(lines).rstrip() + "\n"
+
+
+def write_team_result_documents(status: dict[str, object], result_dir: Path) -> None:
+    agents = status.get("agents", [])
+    by_team: dict[str, list[dict[str, object]]] = {}
+    if isinstance(agents, list):
+        for agent in agents:
+            if isinstance(agent, dict):
+                team = str(agent.get("parent") or "Company")
+                by_team.setdefault(team, []).append(agent)
+    lines = [
+        "# Team Result Documents",
+        "",
+        f"- Session: {status.get('session') or 'n/a'}",
+        f"- Cycle: {status.get('cycle_id')}",
+        "",
+        "| Team | Result |",
+        "| --- | --- |",
+    ]
+    for team, team_agents in sorted(by_team.items()):
+        filename = f"{slugify(team)}.md"
+        atomic_write_text(result_dir / filename, render_single_team_result(status, team, team_agents))
+        lines.append(f"| {team} | [{filename}]({filename}) |")
+    if not by_team:
+        lines.append("| None | none |")
+    atomic_write_text(result_dir / "README.md", "\n".join(lines).rstrip() + "\n")
 
 
 def write_status(status: dict[str, object], output_dir: Path | None = None) -> None:
@@ -2419,6 +2523,7 @@ def write_status(status: dict[str, object], output_dir: Path | None = None) -> N
     atomic_write_text(CEO_SESSION_REVIEW_FILE, render_ceo_session_review(status))
     atomic_write_text(TEAM_ACTIVITY_FILE, render_team_activity_plan(status))
     atomic_write_text(TEAM_SESSION_RESULTS_FILE, render_team_session_results(status))
+    write_team_result_documents(status, TEAM_RESULT_DIR)
     if output_dir is not None:
         atomic_write_json(output_dir / "status.json", status)
         render_tool_usage_reports(
@@ -2433,6 +2538,7 @@ def write_status(status: dict[str, object], output_dir: Path | None = None) -> N
         atomic_write_text(output_dir / "CEO-SESSION-REVIEW.md", render_ceo_session_review(status))
         atomic_write_text(output_dir / "TEAM-ACTIVITY-PLAN.md", render_team_activity_plan(status))
         atomic_write_text(output_dir / "TEAM-SESSION-RESULTS.md", render_team_session_results(status))
+        write_team_result_documents(status, output_dir / "team-results")
         write_session_index()
 
 
@@ -2687,6 +2793,7 @@ def render_console_report(status: dict[str, object]) -> str:
             f"CEO Review  : {CEO_SESSION_REVIEW_FILE.relative_to(ROOT)}",
             f"Team Plan   : {TEAM_ACTIVITY_FILE.relative_to(ROOT)}",
             f"Team Results: {TEAM_SESSION_RESULTS_FILE.relative_to(ROOT)}",
+            f"Team Docs   : {TEAM_RESULT_DIR.relative_to(ROOT)}",
             f"Logs        : {LOG_DIR.relative_to(ROOT)}",
             f"Products    : {PRODUCT_DIR.relative_to(ROOT)}",
         ]

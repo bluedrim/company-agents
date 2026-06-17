@@ -205,6 +205,8 @@ class CompanyAgentRunnerTests(unittest.TestCase):
         self.assertIn("Ask Another Team", plan)
 
     def test_team_session_results_renders_team_outputs_only(self):
+        product_path = ROOT / "runtime" / "test-products" / "backend-engineer.md"
+        run_company.atomic_write_text(product_path, "# Backend Result\n\n- 실제 API 초안\n- 데이터 모델 후보")
         status = {
             "session": "session-001",
             "cycle_id": "unit-test",
@@ -216,7 +218,7 @@ class CompanyAgentRunnerTests(unittest.TestCase):
                     "parent": "Engineering Team",
                     "state": "active",
                     "task_count": 1,
-                    "work_product": "runtime/outputs/session-001/work-products/engineering-team/backend-engineer.md",
+                    "work_product": "runtime/test-products/backend-engineer.md",
                     "log": "runtime/outputs/session-001/agent-logs/backend-engineer.md",
                     "tasks": [{"status": "Ready", "task": "API와 데이터 모델 후보 정리", "due": "Day 3", "dependency": "CPO scope"}],
                     "recommended_tools": [{"tool": "Architecture Decision Record", "type": "Decision log"}],
@@ -229,6 +231,34 @@ class CompanyAgentRunnerTests(unittest.TestCase):
         self.assertIn("Backend Engineer", results)
         self.assertIn("Work Product:", results)
         self.assertIn("API와 데이터 모델 후보 정리", results)
+        self.assertIn("Result Content", results)
+        self.assertIn("실제 API 초안", results)
+
+    def test_team_result_documents_write_actual_team_files(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            product_path = ROOT / "runtime" / "test-products" / "frontend-engineer.md"
+            run_company.atomic_write_text(product_path, "# Frontend Result\n\n- 실제 화면 흐름")
+            status = {
+                "session": "session-001",
+                "cycle_id": "unit-test",
+                "generated_at": "2026-06-12T00:00:00+09:00",
+                "agents": [
+                    {
+                        "name": "Frontend Engineer",
+                        "parent": "Engineering Team",
+                        "state": "active",
+                        "task_count": 1,
+                        "work_product": "runtime/test-products/frontend-engineer.md",
+                    }
+                ],
+            }
+            result_dir = Path(tmp) / "team-results"
+            run_company.write_team_result_documents(status, result_dir)
+            index = run_company.read_text(result_dir / "README.md")
+            team_doc = run_company.read_text(result_dir / "engineering-team.md")
+            self.assertIn("Engineering Team", index)
+            self.assertIn("Frontend Engineer", team_doc)
+            self.assertIn("실제 화면 흐름", team_doc)
 
     def test_filtered_cycle_exits_when_llm_is_disabled(self):
         with self.assertRaises(run_company.LLMConnectionError):
@@ -274,6 +304,7 @@ class CompanyAgentRunnerTests(unittest.TestCase):
         team_results = run_company.read_text(run_company.TEAM_SESSION_RESULTS_FILE)
         self.assertIn("# Team Session Results", team_results)
         self.assertIn("Team Result Index", team_results)
+        self.assertIn("Result Content", team_results)
 
     def test_run_agent_requires_llm_content(self):
         agent = run_company.AgentRuntime(name="CEO Agent", role_file="CEO-Agent.md", kind="executive")
