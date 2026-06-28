@@ -266,6 +266,31 @@ def summarize_session_activity(status: dict[str, object]) -> list[str]:
     if not isinstance(agents, list) or not agents:
         return ["No agent activity recorded for this session."]
 
+    execution = status.get("execution", {})
+    if isinstance(execution, dict):
+        total = int(execution.get("total_agents") or 0)
+        completed = int(execution.get("completed_agents") or 0)
+        running = int(execution.get("running_agents") or 0)
+        queued = int(execution.get("queued_agents") or 0)
+        percent = float(execution.get("percent_complete") or 0)
+        if total:
+            lines = [
+                f"Progress    : {completed}/{total} ({percent:.1f}%)",
+                f"Running     : {running}",
+                f"Queued      : {queued}",
+            ]
+            current_agents = execution.get("current_agents", [])
+            if isinstance(current_agents, list) and current_agents:
+                lines.append("Current     : " + ", ".join(str(name) for name in current_agents[:5]))
+            recent_events = execution.get("recent_events", [])
+            if isinstance(recent_events, list) and recent_events:
+                lines.append("Recent      : " + " | ".join(str(event) for event in recent_events[-3:]))
+            lines.append("")
+        else:
+            lines = []
+    else:
+        lines = []
+
     connected = 0
     failed = 0
     assigned_tasks = 0
@@ -289,13 +314,13 @@ def summarize_session_activity(status: dict[str, object]) -> list[str]:
         if isinstance(recommendations, list):
             tool_recommendations += len(recommendations)
 
-    lines = [
+    lines.extend([
         f"Agents Run  : {len(agents)}",
         f"Connected   : {connected}",
         f"Failed      : {failed}",
         f"Tasks       : {assigned_tasks}",
         f"Tool Uses   : {tool_recommendations}",
-    ]
+    ])
     if active_names:
         lines.append("Active      : " + ", ".join(active_names[:5]) + (" ..." if len(active_names) > 5 else ""))
     if failed_names:
@@ -1692,9 +1717,122 @@ def failed_agent_result(agent: AgentRuntime, error: BaseException, log_dir: Path
     }
 
 
+def pending_agent_result(
+    agent: AgentRuntime,
+    items: list[WorkItem],
+    lifecycle: str,
+    log_dir: Path,
+    product_dir: Path,
+) -> dict[str, object]:
+    tasks = pick_tasks(agent, items)
+    product_path = agent_product_path(product_dir, agent)
+    log_path = log_dir / f"{agent.slug}.md"
+    recommendations = recommend_tools_for_tasks(team_name_for_agent(agent), tasks)
+    return {
+        "name": agent.name,
+        "kind": agent.kind,
+        "parent": agent.parent,
+        "tool_team": team_name_for_agent(agent),
+        "state": lifecycle,
+        "lifecycle": lifecycle,
+        "llm": "pending" if lifecycle == "queued" else "running",
+        "llm_error": None,
+        "task_count": len(tasks),
+        "tasks": [dataclasses.asdict(item) for item in tasks],
+        "recommended_tools": recommendations,
+        "log": str(log_path.relative_to(ROOT)),
+        "work_product": str(product_path.relative_to(ROOT)),
+        "last_heartbeat": now_iso(),
+    }
+
+
+def execution_snapshot(
+    lifecycle_by_agent: dict[str, str],
+    total_agents: int,
+    started_at: str,
+    recent_events: list[str],
+) -> dict[str, object]:
+    completed_states = {"completed", "failed"}
+    completed = sum(1 for state in lifecycle_by_agent.values() if state in completed_states)
+    failed = sum(1 for state in lifecycle_by_agent.values() if state == "failed")
+    running = sum(1 for state in lifecycle_by_agent.values() if state == "running")
+    queued = sum(1 for state in lifecycle_by_agent.values() if state == "queued")
+    percent = 100.0 if total_agents == 0 else round((completed / total_agents) * 100, 1)
+    current_agents = [
+        name
+        for name, state in sorted(lifecycle_by_agent.items(), key=lambda item: item[0])
+        if state == "running"
+    ]
+    return {
+        "state": "failed" if failed else "completed" if completed == total_agents else "running",
+        "started_at": started_at,
+        "updated_at": now_iso(),
+        "total_agents": total_agents,
+        "completed_agents": completed,
+        "running_agents": running,
+        "queued_agents": queued,
+        "failed_agents": failed,
+        "percent_complete": percent,
+        "current_agents": current_agents,
+        "recent_events": recent_events[-12:],
+    }
+
+
+def build_runtime_status(
+    *,
+    cycle_id: str,
+    session_number: int,
+    session_mode: str,
+    output_dir: Path,
+    prev_session_dir: Path | None,
+    work_item_count: int,
+    llm_config: LLMConfig,
+    agents: list[dict[str, object]],
+    execution: dict[str, object],
+    error: str | None = None,
+) -> dict[str, object]:
+    team_counts: dict[str, int] = {}
+    for result in agents:
+        team = str(result.get("parent") or "Company")
+        team_counts[team] = team_counts.get(team, 0) + 1
+    failed_count = sum(1 for result in agents if result.get("state") == "failed" or result.get("lifecycle") == "failed")
+    status: dict[str, object] = {
+        "cycle_id": cycle_id,
+        "session": f"session-{session_number:03d}",
+        "session_number": session_number,
+        "session_mode": session_mode,
+        "output_dir": str(output_dir.relative_to(ROOT)),
+        "previous_output_dir": str(prev_session_dir.relative_to(ROOT)) if prev_session_dir else None,
+        "generated_at": now_iso(),
+        "agent_count": len(agents),
+        "failed_agent_count": failed_count,
+        "work_item_count": work_item_count,
+        "team_count": len(team_counts),
+        "teams": team_counts,
+        "llm": {
+            "enabled": llm_config.enabled,
+            "provider": llm_config.provider,
+            "base_url": llm_config.base_url,
+            "model": llm_config.model,
+            "agent_limit": llm_config.agent_limit,
+            "concurrency": llm_config.concurrency,
+            "connected_count": sum(1 for result in agents if result.get("llm") == "connected"),
+        },
+        "execution": execution,
+        "agents": agents,
+    }
+    if error:
+        status["error"] = error
+        cast_llm = status["llm"]
+        if isinstance(cast_llm, dict):
+            cast_llm["error"] = error
+    return status
+
+
 def render_dashboard(status: dict[str, object]) -> str:
     llm = status.get("llm", {})
     agents = status.get("agents", [])
+    execution = status.get("execution", {})
     top_error = str(status.get("error") or "")
     taskful_agents = []
     failed_agents = []
@@ -1741,9 +1879,31 @@ def render_dashboard(status: dict[str, object]) -> str:
         f"- Failed Agents: {status.get('failed_agent_count', len(failed_agents))}",
         f"- Work Items Loaded: {status.get('work_item_count')}",
         "",
-        "## LLM",
-        "",
     ]
+    if isinstance(execution, dict) and execution.get("total_agents") is not None:
+        current_agents = execution.get("current_agents", [])
+        recent_events = execution.get("recent_events", [])
+        lines.extend(
+            [
+                "## Live Progress",
+                "",
+                f"- State: {execution.get('state')}",
+                f"- Started At: {execution.get('started_at')}",
+                f"- Updated At: {execution.get('updated_at')}",
+                f"- Progress: {execution.get('completed_agents')}/{execution.get('total_agents')} ({execution.get('percent_complete')}%)",
+                f"- Running: {execution.get('running_agents')}",
+                f"- Queued: {execution.get('queued_agents')}",
+                f"- Failed: {execution.get('failed_agents')}",
+            ]
+        )
+        if isinstance(current_agents, list) and current_agents:
+            lines.append("- Current Agents: " + ", ".join(str(name) for name in current_agents[:10]))
+        if isinstance(recent_events, list) and recent_events:
+            lines.extend(["", "### Recent Events", ""])
+            for event in recent_events[-8:]:
+                lines.append(f"- {event}")
+        lines.append("")
+    lines.extend(["## LLM", ""])
     if isinstance(llm, dict):
         lines.extend(
             [
@@ -2638,6 +2798,40 @@ def run_cycle(
         raise LLMConnectionError(error)
     llm_semaphore = threading.Semaphore(llm_config.concurrency)
     llm_enabled_agents = {agent.name for agent in agents}
+    started_at = now_iso()
+    lifecycle_by_agent = {agent.name: "queued" for agent in agents}
+    for agent in agents[:max_workers]:
+        lifecycle_by_agent[agent.name] = "running"
+    recent_events = [f"{started_at} session started with {len(agents)} agent(s)"]
+    result_by_agent: dict[str, dict[str, object]] = {
+        agent.name: pending_agent_result(
+            agent,
+            work_items,
+            lifecycle_by_agent[agent.name],
+            output_log_dir,
+            output_product_dir,
+        )
+        for agent in agents
+    }
+
+    def publish_progress(error: str | None = None) -> dict[str, object]:
+        ordered_results = [result_by_agent[agent.name] for agent in agents]
+        status = build_runtime_status(
+            cycle_id=cycle_id,
+            session_number=session_number,
+            session_mode=session_mode,
+            output_dir=output_dir,
+            prev_session_dir=prev_session_dir,
+            work_item_count=len(work_items),
+            llm_config=llm_config,
+            agents=ordered_results,
+            execution=execution_snapshot(lifecycle_by_agent, len(agents), started_at, recent_events),
+            error=error,
+        )
+        write_status(status, output_dir=output_dir)
+        return status
+
+    publish_progress()
 
     with concurrent.futures.ThreadPoolExecutor(max_workers=max_workers) as executor:
         future_to_agent = {
@@ -2655,78 +2849,43 @@ def run_cycle(
             ): agent
             for agent in agents
         }
-        results = []
+        completed_count = 0
         for future in concurrent.futures.as_completed(future_to_agent):
             agent = future_to_agent[future]
             try:
-                results.append(future.result())
+                result = future.result()
+                result["lifecycle"] = "completed"
+                result_by_agent[agent.name] = result
+                lifecycle_by_agent[agent.name] = "completed"
+                completed_count += 1
+                recent_events.append(f"{now_iso()} completed {agent.name}")
+                next_index = max_workers + completed_count - 1
+                if next_index < len(agents):
+                    next_agent = agents[next_index]
+                    if lifecycle_by_agent.get(next_agent.name) == "queued":
+                        lifecycle_by_agent[next_agent.name] = "running"
+                        result_by_agent[next_agent.name] = pending_agent_result(
+                            next_agent,
+                            work_items,
+                            "running",
+                            output_log_dir,
+                            output_product_dir,
+                        )
+                        recent_events.append(f"{now_iso()} started {next_agent.name}")
+                publish_progress()
             except Exception as error:
-                results.append(failed_agent_result(agent, error, log_dir=output_log_dir, product_dir=output_product_dir))
+                failed_result = failed_agent_result(agent, error, log_dir=output_log_dir, product_dir=output_product_dir)
+                failed_result["lifecycle"] = "failed"
+                result_by_agent[agent.name] = failed_result
+                lifecycle_by_agent[agent.name] = "failed"
+                recent_events.append(f"{now_iso()} failed {agent.name}: {error}")
                 for pending in future_to_agent:
                     if pending is not future:
                         pending.cancel()
-                failed_status = {
-                    "cycle_id": cycle_id,
-                    "session": f"session-{session_number:03d}",
-                    "session_number": session_number,
-                    "session_mode": session_mode,
-                    "output_dir": str(output_dir.relative_to(ROOT)),
-                    "previous_output_dir": str(prev_session_dir.relative_to(ROOT)) if prev_session_dir else None,
-                    "generated_at": now_iso(),
-                    "agent_count": len(results),
-                    "failed_agent_count": 1,
-                    "work_item_count": len(work_items),
-                    "team_count": 0,
-                    "teams": {},
-                    "llm": {
-                        "enabled": llm_config.enabled,
-                        "provider": llm_config.provider,
-                        "base_url": llm_config.base_url,
-                        "model": llm_config.model,
-                        "agent_limit": llm_config.agent_limit,
-                        "concurrency": llm_config.concurrency,
-                        "connected_count": sum(1 for result in results if result.get("llm") == "connected"),
-                        "error": str(error),
-                    },
-                    "agents": sorted(results, key=lambda item: str(item["name"])),
-                    "error": str(error),
-                }
-                write_status(failed_status, output_dir=output_dir)
+                publish_progress(error=str(error))
                 raise LLMConnectionError(str(error)) from error
 
-    results.sort(key=lambda item: str(item["name"]))
-    llm_connected_count = sum(1 for result in results if result["llm"] == "connected")
-    failed_count = sum(1 for result in results if result.get("state") == "failed")
-    team_counts: dict[str, int] = {}
-    for result in results:
-        team = str(result.get("parent") or "Company")
-        team_counts[team] = team_counts.get(team, 0) + 1
-    status = {
-        "cycle_id": cycle_id,
-        "session": f"session-{session_number:03d}",
-        "session_number": session_number,
-        "session_mode": session_mode,
-        "output_dir": str(output_dir.relative_to(ROOT)),
-        "previous_output_dir": str(prev_session_dir.relative_to(ROOT)) if prev_session_dir else None,
-        "generated_at": now_iso(),
-        "agent_count": len(results),
-        "failed_agent_count": failed_count,
-        "work_item_count": len(work_items),
-        "team_count": len(team_counts),
-        "teams": team_counts,
-        "llm": {
-            "enabled": llm_config.enabled,
-            "provider": llm_config.provider,
-            "base_url": llm_config.base_url,
-            "model": llm_config.model,
-            "agent_limit": llm_config.agent_limit,
-            "concurrency": llm_config.concurrency,
-            "connected_count": llm_connected_count,
-        },
-        "agents": results,
-    }
-    write_status(status, output_dir=output_dir)
-    return status
+    return publish_progress()
 
 
 def render_console_report(status: dict[str, object]) -> str:
@@ -2734,7 +2893,9 @@ def render_console_report(status: dict[str, object]) -> str:
     error = str(status.get("error") or "")
     failed = int(status.get("failed_agent_count") or 0)
     agent_count = int(status.get("agent_count") or 0)
-    state = "FAILED" if error or failed else "OK"
+    execution = status.get("execution", {})
+    execution_state = str(execution.get("state") or "").upper() if isinstance(execution, dict) else ""
+    state = "FAILED" if error or failed else execution_state or "OK"
     session = str(status.get("session") or "n/a")
     lines = [
         "",

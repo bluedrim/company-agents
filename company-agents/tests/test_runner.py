@@ -160,6 +160,61 @@ class CompanyAgentRunnerTests(unittest.TestCase):
         self.assertIn("Executive Decisions Needed", review)
         self.assertIn("CEO Agent", review)
 
+    def test_dashboard_and_console_render_live_progress(self):
+        status = {
+            "session": "session-001",
+            "session_mode": "initial",
+            "cycle_id": "unit-test",
+            "generated_at": "2026-06-12T00:00:00+09:00",
+            "agent_count": 2,
+            "failed_agent_count": 0,
+            "work_item_count": 1,
+            "previous_output_dir": None,
+            "teams": {"Company": 2},
+            "llm": {"provider": "test", "model": "test-model", "connected_count": 1},
+            "execution": {
+                "state": "running",
+                "started_at": "2026-06-12T00:00:00+09:00",
+                "updated_at": "2026-06-12T00:00:05+09:00",
+                "total_agents": 2,
+                "completed_agents": 1,
+                "running_agents": 1,
+                "queued_agents": 0,
+                "failed_agents": 0,
+                "percent_complete": 50.0,
+                "current_agents": ["COO Agent"],
+                "recent_events": ["completed CEO Agent", "started COO Agent"],
+            },
+            "agents": [
+                {
+                    "name": "CEO Agent",
+                    "parent": None,
+                    "state": "active",
+                    "lifecycle": "completed",
+                    "llm": "connected",
+                    "task_count": 1,
+                    "recommended_tools": [],
+                },
+                {
+                    "name": "COO Agent",
+                    "parent": None,
+                    "state": "running",
+                    "lifecycle": "running",
+                    "llm": "running",
+                    "task_count": 0,
+                    "recommended_tools": [],
+                },
+            ],
+        }
+        dashboard = run_company.render_dashboard(status)
+        console = run_company.render_console_report(status)
+        self.assertIn("## Live Progress", dashboard)
+        self.assertIn("Progress: 1/2 (50.0%)", dashboard)
+        self.assertIn("Current Agents: COO Agent", dashboard)
+        self.assertIn("State       : RUNNING", console)
+        self.assertIn("Progress    : 1/2 (50.0%)", console)
+        self.assertIn("Current     : COO Agent", console)
+
     def test_ceo_session_review_renders_team_directives(self):
         status = {
             "session": "session-001",
