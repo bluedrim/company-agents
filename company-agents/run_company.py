@@ -3104,7 +3104,7 @@ def render_dashboard_html(port: int = 8778) -> str:
     main {{
       padding: 20px 24px 32px;
       display: grid;
-      grid-template-columns: minmax(320px, 420px) minmax(0, 1fr);
+      grid-template-columns: 1fr;
       gap: 18px;
       align-items: start;
     }}
@@ -3133,6 +3133,34 @@ def render_dashboard_html(port: int = 8778) -> str:
     .statusline {{ color: var(--muted); font-size: 13px; margin-top: 8px; }}
     .grid {{ display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 18px; }}
     .wide {{ grid-column: 1 / -1; }}
+    .top-grid {{
+      display: grid;
+      grid-template-columns: minmax(280px, 1fr) minmax(360px, 1.2fr) minmax(260px, .9fr);
+      gap: 18px;
+      align-items: stretch;
+    }}
+    .top-grid section {{ height: 100%; }}
+    .dashboard-grid {{
+      display: grid;
+      grid-template-columns: minmax(180px, 1fr) minmax(420px, 2.5fr) minmax(360px, 1.5fr);
+      gap: 18px;
+      align-items: start;
+    }}
+    .current-panel {{
+      position: sticky;
+      top: 92px;
+    }}
+    .team-panel {{
+      min-width: 0;
+    }}
+    .detail-panel {{
+      min-width: 0;
+      position: sticky;
+      top: 92px;
+    }}
+    .dashboard-markdown-panel {{
+      grid-column: 2 / -1;
+    }}
     .team-block {{
       border: 1px solid var(--line);
       border-radius: 8px;
@@ -3179,6 +3207,16 @@ def render_dashboard_html(port: int = 8778) -> str:
       padding: 8px;
       min-height: 58px;
       background: #fbfcfe;
+    }}
+    .detail-content {{
+      display: grid;
+      grid-template-columns: 1fr;
+      gap: 12px;
+    }}
+    .compact-list {{
+      padding-left: 16px;
+      max-height: 360px;
+      overflow: auto;
     }}
     ul {{ margin: 0; padding-left: 18px; }}
     li {{ margin: 5px 0; }}
@@ -3227,7 +3265,9 @@ def render_dashboard_html(port: int = 8778) -> str:
     .warn {{ color: var(--warn); }}
     @media (max-width: 920px) {{
       main {{ grid-template-columns: 1fr; padding: 16px; }}
-      .grid, .row {{ grid-template-columns: 1fr; }}
+      .grid, .row, .top-grid, .dashboard-grid, .detail-meta {{ grid-template-columns: 1fr; }}
+      .current-panel, .detail-panel {{ position: static; }}
+      .dashboard-markdown-panel {{ grid-column: auto; }}
     }}
   </style>
 </head>
@@ -3240,7 +3280,7 @@ def render_dashboard_html(port: int = 8778) -> str:
     <button class="secondary" id="refresh">Refresh</button>
   </header>
   <main>
-    <div>
+    <div class="top-grid">
       <section>
         <h2>Runtime</h2>
         <div class="metrics">
@@ -3255,7 +3295,7 @@ def render_dashboard_html(port: int = 8778) -> str:
         </div>
         <div class="statusline" id="message"></div>
       </section>
-      <section style="margin-top:18px">
+      <section>
         <h2>Input</h2>
         <form id="taskForm">
           <div class="field">
@@ -3281,21 +3321,21 @@ def render_dashboard_html(port: int = 8778) -> str:
         </form>
         <div class="statusline" id="formStatus"></div>
       </section>
-    </div>
-    <div class="grid">
-      <section>
-        <h2>Current Agents</h2>
-        <ul id="currentAgents"><li>No running agents.</li></ul>
-      </section>
       <section>
         <h2>Recent Events</h2>
         <ul id="events"><li>No events.</li></ul>
       </section>
-      <section class="wide">
+    </div>
+    <div class="dashboard-grid">
+      <section class="current-panel">
+        <h2>Current Agents</h2>
+        <ul class="compact-list" id="currentAgents"><li>No running agents.</li></ul>
+      </section>
+      <section class="team-panel">
         <h2>Agents By Team</h2>
         <div id="teamAgents">No agent data.</div>
       </section>
-      <section class="wide">
+      <section class="detail-panel">
         <h2>Agent Detail</h2>
         <div class="detail-meta">
           <div class="detail-box"><div class="label">Name</div><div id="detailName">-</div></div>
@@ -3303,7 +3343,7 @@ def render_dashboard_html(port: int = 8778) -> str:
           <div class="detail-box"><div class="label">State</div><div id="detailState">-</div></div>
           <div class="detail-box"><div class="label">Tasks</div><div id="detailTasks">-</div></div>
         </div>
-        <div class="grid">
+        <div class="detail-content">
           <div>
             <h2>Current Situation</h2>
             <pre id="detailSituation">Select an agent.</pre>
@@ -3314,7 +3354,7 @@ def render_dashboard_html(port: int = 8778) -> str:
           </div>
         </div>
       </section>
-      <section>
+      <section class="dashboard-markdown-panel">
         <h2>Dashboard Markdown</h2>
         <pre id="dashboardMd">No dashboard file.</pre>
       </section>
