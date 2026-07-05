@@ -3176,13 +3176,23 @@ def render_dashboard_html(port: int = 8778) -> str:
       border-bottom: 1px solid var(--line);
       font-weight: 700;
       font-size: 13px;
+      cursor: pointer;
+      width: 100%;
+      color: var(--ink);
+      text-align: left;
+      border-left: 0;
+      border-right: 0;
+      border-top: 0;
     }}
+    .team-head:hover {{ background: #eef4ff; }}
+    .team-toggle {{ color: var(--muted); font-weight: 700; margin-right: 6px; }}
     .agent-list {{
       display: grid;
       grid-template-columns: repeat(auto-fill, minmax(190px, 1fr));
       gap: 8px;
       padding: 10px;
     }}
+    .agent-list.collapsed {{ display: none; }}
     .agent-button {{
       border: 1px solid var(--line);
       background: #fff;
@@ -3364,6 +3374,7 @@ def render_dashboard_html(port: int = 8778) -> str:
     const $ = (id) => document.getElementById(id);
     let latestAgents = [];
     let selectedAgentIndex = null;
+    const expandedTeams = new Set();
     function clsForState(value) {{
       const lower = String(value || '').toLowerCase();
       if (lower.includes('fail')) return 'bad';
@@ -3415,6 +3426,15 @@ def render_dashboard_html(port: int = 8778) -> str:
       document.querySelectorAll('.agent-button').forEach((button) => button.classList.toggle('selected', Number(button.dataset.index) === index));
       const agent = latestAgents.find((item) => Number(item.dashboard_index) === index) || latestAgents[index];
       if (!agent) return;
+      const teamName = agent.team || agent.parent || 'Company';
+      expandedTeams.add(teamName);
+      document.querySelectorAll('.team-block').forEach((block) => {{
+        if (block.dataset.team !== teamName) return;
+        const listEl = block.querySelector('.agent-list');
+        const toggle = block.querySelector('.team-toggle');
+        if (listEl) listEl.classList.remove('collapsed');
+        if (toggle) toggle.textContent = 'v';
+      }});
       $('detailName').textContent = agent.name || '-';
       $('detailTeam').textContent = agent.team || agent.parent || 'Company';
       $('detailState').textContent = agent.lifecycle || agent.state || '-';
@@ -3443,17 +3463,35 @@ def render_dashboard_html(port: int = 8778) -> str:
       }});
       [...byTeam.keys()].sort().forEach((team) => {{
         const teamAgents = byTeam.get(team).sort((a, b) => String(a.name || '').localeCompare(String(b.name || '')));
+        const expanded = expandedTeams.has(team);
         const block = document.createElement('div');
         block.className = 'team-block';
-        const head = document.createElement('div');
+        block.dataset.team = team;
+        const head = document.createElement('button');
+        head.type = 'button';
         head.className = 'team-head';
         const title = document.createElement('span');
-        title.textContent = team;
+        const toggle = document.createElement('span');
+        toggle.className = 'team-toggle';
+        toggle.textContent = expanded ? 'v' : '>';
+        title.appendChild(toggle);
+        title.appendChild(document.createTextNode(team));
         const count = document.createElement('span');
         count.textContent = `${{teamAgents.length}} agent(s)`;
         head.append(title, count);
         const listEl = document.createElement('div');
-        listEl.className = 'agent-list';
+        listEl.className = expanded ? 'agent-list' : 'agent-list collapsed';
+        head.addEventListener('click', () => {{
+          if (expandedTeams.has(team)) {{
+            expandedTeams.delete(team);
+            listEl.classList.add('collapsed');
+            toggle.textContent = '>';
+          }} else {{
+            expandedTeams.add(team);
+            listEl.classList.remove('collapsed');
+            toggle.textContent = 'v';
+          }}
+        }});
         teamAgents.forEach((agent) => {{
           const button = document.createElement('button');
           button.type = 'button';
@@ -3470,10 +3508,16 @@ def render_dashboard_html(port: int = 8778) -> str:
         block.append(head, listEl);
         container.appendChild(block);
       }});
-      if (selectedAgentIndex === null || !agents.some((agent) => Number(agent.dashboard_index) === selectedAgentIndex)) {{
-        showAgentDetail(Number(agents[0].dashboard_index));
-      }} else {{
+      if (selectedAgentIndex !== null && agents.some((agent) => Number(agent.dashboard_index) === selectedAgentIndex)) {{
         showAgentDetail(selectedAgentIndex);
+      }} else {{
+        selectedAgentIndex = null;
+        $('detailName').textContent = '-';
+        $('detailTeam').textContent = '-';
+        $('detailState').textContent = '-';
+        $('detailTasks').textContent = '-';
+        $('detailSituation').textContent = 'Select an agent.';
+        $('detailReport').textContent = 'Select an agent.';
       }}
     }}
     async function loadStatus() {{

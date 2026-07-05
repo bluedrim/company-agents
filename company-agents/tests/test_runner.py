@@ -231,6 +231,9 @@ class CompanyAgentRunnerTests(unittest.TestCase):
         self.assertIn("current-panel", html)
         self.assertIn("team-panel", html)
         self.assertIn("detail-panel", html)
+        self.assertIn("expandedTeams", html)
+        self.assertIn("agent-list collapsed", html)
+        self.assertIn("team-toggle", html)
 
     def test_dashboard_payload_has_status_shape(self):
         payload = run_company.dashboard_payload()
