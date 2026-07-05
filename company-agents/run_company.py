@@ -12,14 +12,17 @@ import argparse
 import concurrent.futures
 import dataclasses
 import datetime as dt
+import http.server
 import json
 import os
 import queue
 import re
+import socketserver
 import sys
 import threading
 import time
 import urllib.error
+import urllib.parse
 import urllib.request
 from pathlib import Path
 
@@ -47,6 +50,9 @@ GENERATED_TOOLS_DIR = ROOT / "team-tools" / "generated"
 STOP_COMMANDS = {"stop", "quit", "exit", "q"}
 INPUT_QUEUE: queue.Queue[str] | None = None
 INPUT_THREAD_STARTED = False
+DASHBOARD_RUN_LOCK = threading.Lock()
+DASHBOARD_RUN_THREAD: threading.Thread | None = None
+DASHBOARD_LAST_MESSAGE = "Dashboard server idle."
 
 AGENT_FILES = {
     "CEO Agent": "CEO-Agent.md",
@@ -2966,6 +2972,488 @@ def print_summary(status: dict[str, object]) -> None:
     print(render_console_report(status))
 
 
+def runtime_process_state(status: dict[str, object]) -> dict[str, object]:
+    generated_at = str(status.get("generated_at") or "")
+    age: float | None = None
+    if generated_at:
+        try:
+            generated = dt.datetime.fromisoformat(generated_at)
+            age = (dt.datetime.now(generated.tzinfo) - generated).total_seconds()
+        except ValueError:
+            age = None
+
+    pid = ""
+    pid_path = RUNTIME_DIR / "company-agents.pid"
+    if pid_path.exists():
+        pid = read_text(pid_path).strip()
+
+    stop_requested_now = STOP_FILE.exists()
+    if stop_requested_now:
+        state = "stop requested"
+    elif pid and age is not None and age <= 120:
+        state = "running"
+    elif age is not None and age <= 120:
+        state = "recently ran"
+    elif pid:
+        state = "unknown"
+    else:
+        state = "not running"
+    return {
+        "state": state,
+        "pid": pid or None,
+        "age_seconds": round(age, 1) if age is not None else None,
+        "stop_requested": stop_requested_now,
+    }
+
+
+def read_runtime_file(path: Path, max_chars: int = 12000) -> str:
+    text = read_text(path)
+    if len(text) <= max_chars:
+        return text
+    return text[:max_chars].rstrip() + "\n\n[truncated]"
+
+
+def dashboard_payload() -> dict[str, object]:
+    status = load_json(STATUS_FILE)
+    files = {
+        "dashboard": str(DASHBOARD_FILE.relative_to(ROOT)),
+        "cycle_brief": str(CYCLE_BRIEF_FILE.relative_to(ROOT)),
+        "operating_review": str(OPERATING_REVIEW_FILE.relative_to(ROOT)),
+        "team_activity": str(TEAM_ACTIVITY_FILE.relative_to(ROOT)),
+        "team_results": str(TEAM_SESSION_RESULTS_FILE.relative_to(ROOT)),
+    }
+    snippets = {
+        "dashboard": read_runtime_file(DASHBOARD_FILE, max_chars=10000),
+        "cycle_brief": read_runtime_file(CYCLE_BRIEF_FILE, max_chars=10000),
+    }
+    execution = status.get("execution", {}) if isinstance(status, dict) else {}
+    return {
+        "generated_at": now_iso(),
+        "status": status,
+        "execution": execution if isinstance(execution, dict) else {},
+        "process": runtime_process_state(status),
+        "files": files,
+        "snippets": snippets,
+        "message": DASHBOARD_LAST_MESSAGE,
+    }
+
+
+def render_dashboard_html(port: int = 8778) -> str:
+    return f"""<!doctype html>
+<html lang="ko">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Company Agents Dashboard</title>
+  <style>
+    :root {{
+      color-scheme: light;
+      --bg: #f5f7fb;
+      --panel: #ffffff;
+      --ink: #18202f;
+      --muted: #657086;
+      --line: #d7deea;
+      --accent: #1d6fd8;
+      --good: #087f5b;
+      --bad: #b42318;
+      --warn: #b15c00;
+    }}
+    * {{ box-sizing: border-box; }}
+    body {{
+      margin: 0;
+      font-family: ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+      background: var(--bg);
+      color: var(--ink);
+    }}
+    header {{
+      border-bottom: 1px solid var(--line);
+      background: var(--panel);
+      padding: 18px 24px;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 16px;
+      position: sticky;
+      top: 0;
+      z-index: 1;
+    }}
+    h1 {{ font-size: 20px; margin: 0; letter-spacing: 0; }}
+    main {{
+      padding: 20px 24px 32px;
+      display: grid;
+      grid-template-columns: minmax(320px, 420px) minmax(0, 1fr);
+      gap: 18px;
+      align-items: start;
+    }}
+    section {{
+      background: var(--panel);
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      padding: 16px;
+    }}
+    h2 {{ margin: 0 0 12px; font-size: 15px; }}
+    .metrics {{
+      display: grid;
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+      gap: 10px;
+    }}
+    .metric {{
+      border: 1px solid var(--line);
+      border-radius: 6px;
+      padding: 10px;
+      min-height: 74px;
+    }}
+    .label {{ color: var(--muted); font-size: 12px; }}
+    .value {{ font-size: 24px; font-weight: 700; margin-top: 4px; overflow-wrap: anywhere; }}
+    .bar {{ height: 12px; background: #e9eef7; border-radius: 999px; overflow: hidden; border: 1px solid var(--line); }}
+    .fill {{ height: 100%; width: 0%; background: var(--accent); transition: width .2s ease; }}
+    .statusline {{ color: var(--muted); font-size: 13px; margin-top: 8px; }}
+    .grid {{ display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 18px; }}
+    ul {{ margin: 0; padding-left: 18px; }}
+    li {{ margin: 5px 0; }}
+    textarea, input, select {{
+      width: 100%;
+      border: 1px solid var(--line);
+      border-radius: 6px;
+      padding: 10px;
+      font: inherit;
+      background: #fff;
+      color: var(--ink);
+    }}
+    textarea {{ min-height: 118px; resize: vertical; }}
+    label {{ display: block; font-size: 12px; color: var(--muted); margin-bottom: 6px; }}
+    .field {{ margin-bottom: 12px; }}
+    .row {{ display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 10px; }}
+    button {{
+      border: 1px solid #155bb0;
+      background: var(--accent);
+      color: white;
+      border-radius: 6px;
+      padding: 10px 12px;
+      font-weight: 700;
+      cursor: pointer;
+    }}
+    button.secondary {{ background: #fff; color: var(--ink); border-color: var(--line); }}
+    button:disabled {{ opacity: .55; cursor: not-allowed; }}
+    pre {{
+      margin: 0;
+      white-space: pre-wrap;
+      overflow-wrap: anywhere;
+      font-size: 12px;
+      line-height: 1.45;
+      background: #f8fafc;
+      border: 1px solid var(--line);
+      border-radius: 6px;
+      padding: 12px;
+      max-height: 520px;
+      overflow: auto;
+    }}
+    table {{ width: 100%; border-collapse: collapse; font-size: 13px; }}
+    th, td {{ text-align: left; border-bottom: 1px solid var(--line); padding: 8px 6px; vertical-align: top; }}
+    th {{ color: var(--muted); font-weight: 600; }}
+    .ok {{ color: var(--good); }}
+    .bad {{ color: var(--bad); }}
+    .warn {{ color: var(--warn); }}
+    @media (max-width: 920px) {{
+      main {{ grid-template-columns: 1fr; padding: 16px; }}
+      .grid, .row {{ grid-template-columns: 1fr; }}
+    }}
+  </style>
+</head>
+<body>
+  <header>
+    <div>
+      <h1>Company Agents Dashboard</h1>
+      <div class="statusline">Polling <code>/api/status</code> on port {port}</div>
+    </div>
+    <button class="secondary" id="refresh">Refresh</button>
+  </header>
+  <main>
+    <div>
+      <section>
+        <h2>Runtime</h2>
+        <div class="metrics">
+          <div class="metric"><div class="label">State</div><div class="value" id="state">-</div></div>
+          <div class="metric"><div class="label">Session</div><div class="value" id="session">-</div></div>
+          <div class="metric"><div class="label">Agents</div><div class="value" id="agents">-</div></div>
+          <div class="metric"><div class="label">Failed</div><div class="value" id="failed">-</div></div>
+        </div>
+        <div style="margin-top:14px">
+          <div class="bar"><div class="fill" id="fill"></div></div>
+          <div class="statusline" id="progressText">No progress data.</div>
+        </div>
+        <div class="statusline" id="message"></div>
+      </section>
+      <section style="margin-top:18px">
+        <h2>Input</h2>
+        <form id="taskForm">
+          <div class="field">
+            <label for="task">CEO task</label>
+            <textarea id="task" name="task" required placeholder="이번 실행 사이클의 목표를 입력하세요."></textarea>
+          </div>
+          <div class="row">
+            <div class="field">
+              <label for="workers">Workers</label>
+              <input id="workers" name="workers" type="number" min="1" value="16">
+            </div>
+            <div class="field">
+              <label for="team">Team filter</label>
+              <input id="team" name="team" placeholder="optional">
+            </div>
+            <div class="field">
+              <label for="agent">Agent filter</label>
+              <input id="agent" name="agent" placeholder="optional">
+            </div>
+          </div>
+          <button type="submit" id="submitTask">Submit and run</button>
+          <button type="button" class="secondary" id="stop">Request stop</button>
+        </form>
+        <div class="statusline" id="formStatus"></div>
+      </section>
+    </div>
+    <div class="grid">
+      <section>
+        <h2>Current Agents</h2>
+        <ul id="currentAgents"><li>No running agents.</li></ul>
+      </section>
+      <section>
+        <h2>Recent Events</h2>
+        <ul id="events"><li>No events.</li></ul>
+      </section>
+      <section>
+        <h2>Agent Table</h2>
+        <table>
+          <thead><tr><th>Name</th><th>State</th><th>Tasks</th><th>LLM</th></tr></thead>
+          <tbody id="agentRows"><tr><td colspan="4">No data.</td></tr></tbody>
+        </table>
+      </section>
+      <section>
+        <h2>Dashboard Markdown</h2>
+        <pre id="dashboardMd">No dashboard file.</pre>
+      </section>
+    </div>
+  </main>
+  <script>
+    const $ = (id) => document.getElementById(id);
+    function clsForState(value) {{
+      const lower = String(value || '').toLowerCase();
+      if (lower.includes('fail')) return 'bad';
+      if (lower.includes('run')) return 'ok';
+      if (lower.includes('stop') || lower.includes('unknown')) return 'warn';
+      return '';
+    }}
+    function list(target, items, empty) {{
+      target.innerHTML = '';
+      if (!items || !items.length) {{
+        const li = document.createElement('li');
+        li.textContent = empty;
+        target.appendChild(li);
+        return;
+      }}
+      items.forEach((item) => {{
+        const li = document.createElement('li');
+        li.textContent = item;
+        target.appendChild(li);
+      }});
+    }}
+    async function loadStatus() {{
+      const res = await fetch('/api/status', {{cache: 'no-store'}});
+      const data = await res.json();
+      const status = data.status || {{}};
+      const execution = data.execution || {{}};
+      const process = data.process || {{}};
+      const state = status.error ? 'failed' : (execution.state || process.state || 'unknown');
+      $('state').textContent = state;
+      $('state').className = 'value ' + clsForState(state);
+      $('session').textContent = status.session || '-';
+      $('agents').textContent = status.agent_count ?? '-';
+      $('failed').textContent = status.failed_agent_count ?? '-';
+      const total = Number(execution.total_agents || status.agent_count || 0);
+      const done = Number(execution.completed_agents || 0);
+      const pct = total ? Number(execution.percent_complete || (done / total * 100)) : 0;
+      $('fill').style.width = Math.max(0, Math.min(100, pct)) + '%';
+      $('progressText').textContent = total ? `${{done}}/${{total}} complete · running ${{execution.running_agents || 0}} · queued ${{execution.queued_agents || 0}}` : 'No progress data.';
+      $('message').textContent = data.message || '';
+      list($('currentAgents'), execution.current_agents || [], 'No running agents.');
+      list($('events'), execution.recent_events || [], 'No events.');
+      const agents = Array.isArray(status.agents) ? status.agents : [];
+      $('agentRows').innerHTML = '';
+      if (!agents.length) {{
+        $('agentRows').innerHTML = '<tr><td colspan="4">No data.</td></tr>';
+      }} else {{
+        agents.slice(0, 80).forEach((agent) => {{
+          const tr = document.createElement('tr');
+          [agent.name || 'unknown', agent.lifecycle || agent.state || '-', agent.task_count ?? 0, agent.llm || '-'].forEach((value) => {{
+            const td = document.createElement('td');
+            td.textContent = String(value);
+            tr.appendChild(td);
+          }});
+          $('agentRows').appendChild(tr);
+        }});
+      }}
+      $('dashboardMd').textContent = (data.snippets && data.snippets.dashboard) || 'No dashboard file.';
+    }}
+    async function submitTask(event) {{
+      event.preventDefault();
+      $('submitTask').disabled = true;
+      $('formStatus').textContent = 'Submitting...';
+      const payload = {{
+        task: $('task').value,
+        workers: Number($('workers').value || 16),
+        team: $('team').value,
+        agent: $('agent').value
+      }};
+      try {{
+        const res = await fetch('/api/task', {{
+          method: 'POST',
+          headers: {{'Content-Type': 'application/json'}},
+          body: JSON.stringify(payload)
+        }});
+        const data = await res.json();
+        $('formStatus').textContent = data.message || (res.ok ? 'Started.' : 'Failed.');
+        await loadStatus();
+      }} catch (error) {{
+        $('formStatus').textContent = String(error);
+      }} finally {{
+        $('submitTask').disabled = false;
+      }}
+    }}
+    async function requestStop() {{
+      const res = await fetch('/api/stop', {{method: 'POST'}});
+      const data = await res.json();
+      $('formStatus').textContent = data.message || 'Stop requested.';
+      await loadStatus();
+    }}
+    $('taskForm').addEventListener('submit', submitTask);
+    $('stop').addEventListener('click', requestStop);
+    $('refresh').addEventListener('click', loadStatus);
+    loadStatus();
+    setInterval(loadStatus, 2000);
+  </script>
+</body>
+</html>
+"""
+
+
+def parse_dashboard_request_body(handler: http.server.BaseHTTPRequestHandler) -> dict[str, object]:
+    length = int(handler.headers.get("Content-Length", "0") or 0)
+    if length <= 0:
+        return {}
+    raw = handler.rfile.read(length).decode("utf-8")
+    content_type = handler.headers.get("Content-Type", "")
+    if "application/json" in content_type:
+        try:
+            payload = json.loads(raw)
+        except json.JSONDecodeError:
+            return {}
+        return payload if isinstance(payload, dict) else {}
+    parsed = urllib.parse.parse_qs(raw)
+    return {key: values[-1] for key, values in parsed.items() if values}
+
+
+def start_dashboard_cycle(task: str, workers: int, agent_filter: str | None, team_filter: str | None) -> tuple[int, dict[str, object]]:
+    global DASHBOARD_RUN_THREAD, DASHBOARD_LAST_MESSAGE
+    task = task.strip()
+    if not task:
+        return 400, {"ok": False, "message": "Task is required."}
+    with DASHBOARD_RUN_LOCK:
+        if DASHBOARD_RUN_THREAD is not None and DASHBOARD_RUN_THREAD.is_alive():
+            return 409, {"ok": False, "message": "A dashboard-triggered run is already active."}
+        cycle_id = dt.datetime.now().strftime("%Y%m%d-%H%M%S")
+        DASHBOARD_LAST_MESSAGE = f"Queued dashboard task for cycle {cycle_id}."
+
+        def run_from_dashboard() -> None:
+            global DASHBOARD_LAST_MESSAGE
+            try:
+                set_user_initial_task(task)
+                DASHBOARD_LAST_MESSAGE = f"Running dashboard task for cycle {cycle_id}."
+                run_cycle(
+                    max_workers=max(1, workers),
+                    cycle_id=cycle_id,
+                    agent_filter=agent_filter or None,
+                    team_filter=team_filter or None,
+                )
+                DASHBOARD_LAST_MESSAGE = f"Completed dashboard task for cycle {cycle_id}."
+            except LLMConnectionError as error:
+                DASHBOARD_LAST_MESSAGE = f"Run failed: {error}"
+            except Exception as error:
+                DASHBOARD_LAST_MESSAGE = f"Run failed: {type(error).__name__}: {error}"
+
+        DASHBOARD_RUN_THREAD = threading.Thread(target=run_from_dashboard, name="dashboard-agent-run", daemon=True)
+        DASHBOARD_RUN_THREAD.start()
+    return 202, {"ok": True, "message": DASHBOARD_LAST_MESSAGE, "cycle_id": cycle_id}
+
+
+class CompanyDashboardHandler(http.server.BaseHTTPRequestHandler):
+    default_workers = 16
+
+    def log_message(self, format: str, *args: object) -> None:
+        sys.stderr.write(f"[dashboard] {self.address_string()} - {format % args}\n")
+
+    def send_text(self, status_code: int, content: str, content_type: str) -> None:
+        body = content.encode("utf-8")
+        self.send_response(status_code)
+        self.send_header("Content-Type", f"{content_type}; charset=utf-8")
+        self.send_header("Content-Length", str(len(body)))
+        self.send_header("Cache-Control", "no-store")
+        self.end_headers()
+        self.wfile.write(body)
+
+    def send_json(self, status_code: int, payload: dict[str, object]) -> None:
+        self.send_text(status_code, json.dumps(payload, ensure_ascii=False), "application/json")
+
+    def do_GET(self) -> None:
+        parsed = urllib.parse.urlparse(self.path)
+        if parsed.path in {"/", "/dashboard"}:
+            self.send_text(200, render_dashboard_html(port=getattr(self.server, "dashboard_port", 8778)), "text/html")
+            return
+        if parsed.path == "/api/status":
+            self.send_json(200, dashboard_payload())
+            return
+        self.send_json(404, {"ok": False, "message": "Not found."})
+
+    def do_POST(self) -> None:
+        global DASHBOARD_LAST_MESSAGE
+        parsed = urllib.parse.urlparse(self.path)
+        if parsed.path == "/api/task":
+            payload = parse_dashboard_request_body(self)
+            workers = parse_int(str(payload.get("workers") or self.default_workers), self.default_workers, minimum=1)
+            status_code, response = start_dashboard_cycle(
+                task=str(payload.get("task") or ""),
+                workers=workers,
+                agent_filter=str(payload.get("agent") or "").strip() or None,
+                team_filter=str(payload.get("team") or "").strip() or None,
+            )
+            self.send_json(status_code, response)
+            return
+        if parsed.path == "/api/stop":
+            atomic_write_text(STOP_FILE, f"Stop requested from dashboard at {now_iso()}\n")
+            DASHBOARD_LAST_MESSAGE = "Stop requested from dashboard."
+            self.send_json(200, {"ok": True, "message": DASHBOARD_LAST_MESSAGE})
+            return
+        self.send_json(404, {"ok": False, "message": "Not found."})
+
+
+class ThreadingDashboardServer(socketserver.ThreadingMixIn, http.server.HTTPServer):
+    daemon_threads = True
+    allow_reuse_address = True
+
+
+def serve_dashboard(port: int = 8778, host: str = "127.0.0.1", workers: int = 16) -> int:
+    RUNTIME_DIR.mkdir(exist_ok=True)
+    CompanyDashboardHandler.default_workers = workers
+    server = ThreadingDashboardServer((host, port), CompanyDashboardHandler)
+    server.dashboard_port = port
+    print(f"Company agents dashboard running at http://{host}:{port}")
+    try:
+        server.serve_forever()
+    except KeyboardInterrupt:
+        print("\nDashboard stopped.")
+    finally:
+        server.server_close()
+    return 0
+
+
 def test_llm() -> int:
     config = build_llm_config()
     print(f"Provider: {config.provider}")
@@ -3059,6 +3547,9 @@ def main() -> int:
     parser.add_argument("--show-tool-audit", action="store_true", help="Print the latest tool audit report.")
     parser.add_argument("--doctor", action="store_true", help="Run structural checks for agents, tasks, playbooks, and tools.")
     parser.add_argument("--test-llm", action="store_true", help="Test the configured LLM connection and exit.")
+    parser.add_argument("--dashboard", action="store_true", help="Serve the local monitoring dashboard.")
+    parser.add_argument("--dashboard-port", type=int, default=8778, help="Dashboard HTTP port.")
+    parser.add_argument("--dashboard-host", default="127.0.0.1", help="Dashboard bind host.")
     parser.add_argument("--interval", type=int, default=60, help="Watch interval in seconds.")
     parser.add_argument("--workers", type=int, default=16, help="Maximum parallel workers.")
     parser.add_argument("--agent", help="Run only agents whose name or slug contains this value.")
@@ -3097,6 +3588,9 @@ def main() -> int:
 
     if args.test_llm:
         return test_llm()
+
+    if args.dashboard:
+        return serve_dashboard(port=args.dashboard_port, host=args.dashboard_host, workers=args.workers)
 
     if not args.once and not args.watch:
         args.once = True

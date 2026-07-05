@@ -96,6 +96,13 @@ watch 모드에서는 각 세션 사이에 60초 동안 대기하며, 터미널�
 
 `agent-status`와 실행 완료 화면은 cycle, output, LLM, 실패 이유, 주요 파일 경로를 한 화면에 요약한다.
 실행 중에는 `runtime/status.json`과 `runtime/DASHBOARD.md`가 에이전트 완료 시점마다 갱신되어 진행률, 현재 실행 중인 에이전트, 최근 이벤트를 보여준다.
+브라우저에서 모니터링하고 새 CEO task를 입력하려면 아래 명령으로 로컬 대시보드를 실행한다.
+
+```sh
+./company-agents/run-agents --dashboard --dashboard-port 8778
+```
+
+대시보드는 `http://127.0.0.1:8778`에서 `runtime/status.json`을 폴링하고, 입력한 task를 `CEO-TASK-DIRECTIVE.md`와 `TASK-BOARD.md`에 반영한 뒤 새 실행 사이클을 시작한다.
 
 특정 팀만 실행하려면 아래처럼 실행한다.
 

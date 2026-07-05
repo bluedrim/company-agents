@@ -215,6 +215,23 @@ class CompanyAgentRunnerTests(unittest.TestCase):
         self.assertIn("Progress    : 1/2 (50.0%)", console)
         self.assertIn("Current     : COO Agent", console)
 
+    def test_dashboard_html_exposes_monitoring_and_input(self):
+        html = run_company.render_dashboard_html(port=8778)
+        self.assertIn("Company Agents Dashboard", html)
+        self.assertIn("/api/status", html)
+        self.assertIn("/api/task", html)
+        self.assertIn("/api/stop", html)
+        self.assertIn("port 8778", html)
+        self.assertIn("Submit and run", html)
+
+    def test_dashboard_payload_has_status_shape(self):
+        payload = run_company.dashboard_payload()
+        self.assertIn("status", payload)
+        self.assertIn("process", payload)
+        self.assertIn("files", payload)
+        self.assertIn("snippets", payload)
+        self.assertIn("message", payload)
+
     def test_ceo_session_review_renders_team_directives(self):
         status = {
             "session": "session-001",
