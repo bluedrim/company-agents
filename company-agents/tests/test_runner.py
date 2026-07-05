@@ -223,6 +223,9 @@ class CompanyAgentRunnerTests(unittest.TestCase):
         self.assertIn("/api/stop", html)
         self.assertIn("port 8778", html)
         self.assertIn("Submit and run", html)
+        self.assertIn("Agents By Team", html)
+        self.assertIn("Agent Detail", html)
+        self.assertIn("showAgentDetail", html)
 
     def test_dashboard_payload_has_status_shape(self):
         payload = run_company.dashboard_payload()
@@ -231,6 +234,28 @@ class CompanyAgentRunnerTests(unittest.TestCase):
         self.assertIn("files", payload)
         self.assertIn("snippets", payload)
         self.assertIn("message", payload)
+
+    def test_dashboard_agent_details_includes_report_content(self):
+        run_company.RUNTIME_DIR.mkdir(exist_ok=True)
+        with tempfile.TemporaryDirectory(dir=run_company.RUNTIME_DIR) as tmp:
+            product_path = Path(tmp) / "agent-report.md"
+            log_path = Path(tmp) / "agent-log.md"
+            run_company.atomic_write_text(product_path, "# Agent Report\n\n- 현재 상황 정리")
+            run_company.atomic_write_text(log_path, "# Agent Log\n\n- heartbeat")
+            status = {
+                "agents": [
+                    {
+                        "name": "Backend Engineer",
+                        "parent": "Engineering Team",
+                        "work_product": str(product_path.relative_to(run_company.ROOT)),
+                        "log": str(log_path.relative_to(run_company.ROOT)),
+                    }
+                ]
+            }
+            details = run_company.dashboard_agent_details(status)
+            self.assertEqual(details[0]["team"], "Engineering Team")
+            self.assertIn("Agent Report", details[0]["report_content"])
+            self.assertIn("Agent Log", details[0]["log_content"])
 
     def test_ceo_session_review_renders_team_directives(self):
         status = {

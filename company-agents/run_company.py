@@ -3013,8 +3013,31 @@ def read_runtime_file(path: Path, max_chars: int = 12000) -> str:
     return text[:max_chars].rstrip() + "\n\n[truncated]"
 
 
+def dashboard_agent_details(status: dict[str, object], max_chars: int = 8000) -> list[dict[str, object]]:
+    agents = status.get("agents", [])
+    if not isinstance(agents, list):
+        return []
+    details: list[dict[str, object]] = []
+    for index, agent in enumerate(agents):
+        if not isinstance(agent, dict):
+            continue
+        item = dict(agent)
+        item["dashboard_index"] = index
+        item["team"] = str(agent.get("parent") or "Company")
+        product = str(agent.get("work_product") or "")
+        log_path = str(agent.get("log") or "")
+        item["report_content"] = read_runtime_file(ROOT / product, max_chars=max_chars) if product else ""
+        item["log_content"] = read_runtime_file(ROOT / log_path, max_chars=max_chars // 2) if log_path else ""
+        details.append(item)
+    return details
+
+
 def dashboard_payload() -> dict[str, object]:
     status = load_json(STATUS_FILE)
+    agent_details = dashboard_agent_details(status)
+    if isinstance(status, dict):
+        status = dict(status)
+        status["agents"] = agent_details
     files = {
         "dashboard": str(DASHBOARD_FILE.relative_to(ROOT)),
         "cycle_brief": str(CYCLE_BRIEF_FILE.relative_to(ROOT)),
@@ -3109,6 +3132,54 @@ def render_dashboard_html(port: int = 8778) -> str:
     .fill {{ height: 100%; width: 0%; background: var(--accent); transition: width .2s ease; }}
     .statusline {{ color: var(--muted); font-size: 13px; margin-top: 8px; }}
     .grid {{ display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 18px; }}
+    .wide {{ grid-column: 1 / -1; }}
+    .team-block {{
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      margin-bottom: 12px;
+      overflow: hidden;
+    }}
+    .team-head {{
+      display: flex;
+      justify-content: space-between;
+      gap: 12px;
+      padding: 10px 12px;
+      background: #f8fafc;
+      border-bottom: 1px solid var(--line);
+      font-weight: 700;
+      font-size: 13px;
+    }}
+    .agent-list {{
+      display: grid;
+      grid-template-columns: repeat(auto-fill, minmax(190px, 1fr));
+      gap: 8px;
+      padding: 10px;
+    }}
+    .agent-button {{
+      border: 1px solid var(--line);
+      background: #fff;
+      color: var(--ink);
+      border-radius: 6px;
+      padding: 10px;
+      text-align: left;
+      font-weight: 600;
+      min-height: 74px;
+    }}
+    .agent-button:hover, .agent-button.selected {{ border-color: var(--accent); box-shadow: 0 0 0 2px rgba(29,111,216,.12); }}
+    .agent-meta {{ display: block; color: var(--muted); font-weight: 500; font-size: 12px; margin-top: 5px; }}
+    .detail-meta {{
+      display: grid;
+      grid-template-columns: repeat(4, minmax(0, 1fr));
+      gap: 8px;
+      margin-bottom: 12px;
+    }}
+    .detail-box {{
+      border: 1px solid var(--line);
+      border-radius: 6px;
+      padding: 8px;
+      min-height: 58px;
+      background: #fbfcfe;
+    }}
     ul {{ margin: 0; padding-left: 18px; }}
     li {{ margin: 5px 0; }}
     textarea, input, select {{
@@ -3220,12 +3291,28 @@ def render_dashboard_html(port: int = 8778) -> str:
         <h2>Recent Events</h2>
         <ul id="events"><li>No events.</li></ul>
       </section>
-      <section>
-        <h2>Agent Table</h2>
-        <table>
-          <thead><tr><th>Name</th><th>State</th><th>Tasks</th><th>LLM</th></tr></thead>
-          <tbody id="agentRows"><tr><td colspan="4">No data.</td></tr></tbody>
-        </table>
+      <section class="wide">
+        <h2>Agents By Team</h2>
+        <div id="teamAgents">No agent data.</div>
+      </section>
+      <section class="wide">
+        <h2>Agent Detail</h2>
+        <div class="detail-meta">
+          <div class="detail-box"><div class="label">Name</div><div id="detailName">-</div></div>
+          <div class="detail-box"><div class="label">Team</div><div id="detailTeam">-</div></div>
+          <div class="detail-box"><div class="label">State</div><div id="detailState">-</div></div>
+          <div class="detail-box"><div class="label">Tasks</div><div id="detailTasks">-</div></div>
+        </div>
+        <div class="grid">
+          <div>
+            <h2>Current Situation</h2>
+            <pre id="detailSituation">Select an agent.</pre>
+          </div>
+          <div>
+            <h2>Report</h2>
+            <pre id="detailReport">Select an agent.</pre>
+          </div>
+        </div>
       </section>
       <section>
         <h2>Dashboard Markdown</h2>
@@ -3235,6 +3322,8 @@ def render_dashboard_html(port: int = 8778) -> str:
   </main>
   <script>
     const $ = (id) => document.getElementById(id);
+    let latestAgents = [];
+    let selectedAgentIndex = null;
     function clsForState(value) {{
       const lower = String(value || '').toLowerCase();
       if (lower.includes('fail')) return 'bad';
@@ -3255,6 +3344,97 @@ def render_dashboard_html(port: int = 8778) -> str:
         li.textContent = item;
         target.appendChild(li);
       }});
+    }}
+    function summarizeAgent(agent) {{
+      const tasks = Array.isArray(agent.tasks) ? agent.tasks : [];
+      const tools = Array.isArray(agent.recommended_tools) ? agent.recommended_tools : [];
+      const lines = [
+        `Lifecycle: ${{agent.lifecycle || agent.state || '-'}}`,
+        `LLM: ${{agent.llm || '-'}}`,
+        `Last heartbeat: ${{agent.last_heartbeat || '-'}}`,
+        `Work product: ${{agent.work_product || '-'}}`,
+        `Log: ${{agent.log || '-'}}`
+      ];
+      if (agent.error || agent.llm_error) lines.push(`Error: ${{agent.error || agent.llm_error}}`);
+      lines.push('', 'Tasks:');
+      if (tasks.length) {{
+        tasks.slice(0, 10).forEach((task) => lines.push(`- ${{task.task || task.owner || 'Task'}} (status: ${{task.status || '-'}}, due: ${{task.due || '-'}})`));
+      }} else {{
+        lines.push('- No structured tasks recorded.');
+      }}
+      lines.push('', 'Recommended tools:');
+      if (tools.length) {{
+        tools.slice(0, 10).forEach((tool) => lines.push(`- ${{tool.tool || tool.name || String(tool)}}`));
+      }} else {{
+        lines.push('- None recorded.');
+      }}
+      return lines.join('\\n');
+    }}
+    function showAgentDetail(index) {{
+      selectedAgentIndex = index;
+      document.querySelectorAll('.agent-button').forEach((button) => button.classList.toggle('selected', Number(button.dataset.index) === index));
+      const agent = latestAgents.find((item) => Number(item.dashboard_index) === index) || latestAgents[index];
+      if (!agent) return;
+      $('detailName').textContent = agent.name || '-';
+      $('detailTeam').textContent = agent.team || agent.parent || 'Company';
+      $('detailState').textContent = agent.lifecycle || agent.state || '-';
+      $('detailTasks').textContent = String(agent.task_count ?? 0);
+      $('detailSituation').textContent = summarizeAgent(agent);
+      $('detailReport').textContent = agent.report_content || agent.log_content || 'No report content available.';
+    }}
+    function renderTeamAgents(agents) {{
+      latestAgents = agents;
+      const container = $('teamAgents');
+      container.innerHTML = '';
+      if (!agents.length) {{
+        container.textContent = 'No agent data.';
+        selectedAgentIndex = null;
+        $('detailSituation').textContent = 'Select an agent.';
+        $('detailReport').textContent = 'Select an agent.';
+        return;
+      }}
+      const byTeam = new Map();
+      agents.forEach((agent, index) => {{
+        const normalizedIndex = Number(agent.dashboard_index ?? index);
+        agent.dashboard_index = normalizedIndex;
+        const team = agent.team || agent.parent || 'Company';
+        if (!byTeam.has(team)) byTeam.set(team, []);
+        byTeam.get(team).push(agent);
+      }});
+      [...byTeam.keys()].sort().forEach((team) => {{
+        const teamAgents = byTeam.get(team).sort((a, b) => String(a.name || '').localeCompare(String(b.name || '')));
+        const block = document.createElement('div');
+        block.className = 'team-block';
+        const head = document.createElement('div');
+        head.className = 'team-head';
+        const title = document.createElement('span');
+        title.textContent = team;
+        const count = document.createElement('span');
+        count.textContent = `${{teamAgents.length}} agent(s)`;
+        head.append(title, count);
+        const listEl = document.createElement('div');
+        listEl.className = 'agent-list';
+        teamAgents.forEach((agent) => {{
+          const button = document.createElement('button');
+          button.type = 'button';
+          button.className = 'agent-button';
+          button.dataset.index = String(agent.dashboard_index);
+          button.textContent = agent.name || 'unknown';
+          const meta = document.createElement('span');
+          meta.className = 'agent-meta';
+          meta.textContent = `${{agent.lifecycle || agent.state || '-'}} · tasks ${{agent.task_count ?? 0}} · ${{agent.llm || '-'}}`;
+          button.appendChild(meta);
+          button.addEventListener('click', () => showAgentDetail(Number(button.dataset.index)));
+          listEl.appendChild(button);
+        }});
+        block.append(head, listEl);
+        container.appendChild(block);
+      }});
+      if (selectedAgentIndex === null || !agents.some((agent) => Number(agent.dashboard_index) === selectedAgentIndex)) {{
+        showAgentDetail(Number(agents[0].dashboard_index));
+      }} else {{
+        showAgentDetail(selectedAgentIndex);
+      }}
     }}
     async function loadStatus() {{
       const res = await fetch('/api/status', {{cache: 'no-store'}});
@@ -3277,20 +3457,7 @@ def render_dashboard_html(port: int = 8778) -> str:
       list($('currentAgents'), execution.current_agents || [], 'No running agents.');
       list($('events'), execution.recent_events || [], 'No events.');
       const agents = Array.isArray(status.agents) ? status.agents : [];
-      $('agentRows').innerHTML = '';
-      if (!agents.length) {{
-        $('agentRows').innerHTML = '<tr><td colspan="4">No data.</td></tr>';
-      }} else {{
-        agents.slice(0, 80).forEach((agent) => {{
-          const tr = document.createElement('tr');
-          [agent.name || 'unknown', agent.lifecycle || agent.state || '-', agent.task_count ?? 0, agent.llm || '-'].forEach((value) => {{
-            const td = document.createElement('td');
-            td.textContent = String(value);
-            tr.appendChild(td);
-          }});
-          $('agentRows').appendChild(tr);
-        }});
-      }}
+      renderTeamAgents(agents);
       $('dashboardMd').textContent = (data.snippets && data.snippets.dashboard) || 'No dashboard file.';
     }}
     async function submitTask(event) {{
