@@ -11,6 +11,7 @@ ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 
 import run_company  # noqa: E402
+import llm_config  # noqa: E402
 
 
 class CompanyAgentRunnerTests(unittest.TestCase):
@@ -74,6 +75,39 @@ class CompanyAgentRunnerTests(unittest.TestCase):
     def test_session_mode_for_previous(self):
         self.assertEqual(run_company.session_mode_for_previous(None), "initial")
         self.assertEqual(run_company.session_mode_for_previous(ROOT), "continue")
+
+    def test_llm_config_is_loaded_from_separate_module(self):
+        old_values = {
+            key: os.environ.get(key)
+            for key in [
+                "LLM_ENABLED",
+                "LLM_PROVIDER",
+                "GPT_OSS_BASE_URL",
+                "GPT_OSS_MODEL",
+                "LLM_AGENT_LIMIT",
+                "LLM_CONCURRENCY",
+            ]
+        }
+        try:
+            os.environ["LLM_ENABLED"] = "true"
+            os.environ["LLM_PROVIDER"] = "gpt-oss"
+            os.environ["GPT_OSS_BASE_URL"] = "http://localhost:8000/v1/"
+            os.environ["GPT_OSS_MODEL"] = "gpt-oss-test"
+            os.environ["LLM_AGENT_LIMIT"] = "7"
+            os.environ["LLM_CONCURRENCY"] = "3"
+            config = llm_config.build_llm_config()
+            self.assertTrue(config.enabled)
+            self.assertEqual(config.provider, "gpt_oss")
+            self.assertEqual(config.base_url, "http://localhost:8000/v1")
+            self.assertEqual(config.model, "gpt-oss-test")
+            self.assertEqual(config.agent_limit, 7)
+            self.assertEqual(config.concurrency, 3)
+        finally:
+            for key, value in old_values.items():
+                if value is None:
+                    os.environ.pop(key, None)
+                else:
+                    os.environ[key] = value
 
     def test_agent_product_path_uses_team_folder(self):
         agent = run_company.AgentRuntime(
