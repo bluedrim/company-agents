@@ -462,6 +462,93 @@ class CompanyAgentRunnerTests(unittest.TestCase):
         with self.assertRaises(run_company.LLMConnectionError):
             run_company.run_agent(agent, [], "self-test", config, True, run_company.threading.Semaphore(1))
 
+    def test_run_agent_retries_shallow_llm_output(self):
+        agent = run_company.AgentRuntime(
+            name="Backend Engineer",
+            role_file=None,
+            kind="staff",
+            parent="Engineering Team",
+        )
+        config = run_company.LLMConfig(
+            enabled=True,
+            provider="gpt_oss",
+            base_url="http://localhost:8000/v1",
+            model="test",
+            api_key="",
+            timeout_seconds=1,
+            temperature=0.2,
+            max_tokens=2200,
+            agent_limit=1,
+            concurrency=1,
+        )
+        rich_content = "\n".join(
+            [
+                "## 판단",
+                "- Backend Team은 이번 세션에서 API 후보를 실제 검토 가능한 수준으로 정리한다.",
+                "- owner: Backend Engineer, due: 이번 세션 종료, next action: API 목록 확정.",
+                "## 실행 계획",
+                "- 인증, 고객, 피드백 API를 우선순위로 나누고 각 API의 입력과 출력을 적는다.",
+                "- CTO Agent에게 기술 리스크 확인을 요청한다.",
+                "## 산출물 초안",
+                "| API | Method | Input | Output | Owner | Due |",
+                "| --- | --- | --- | --- | --- | --- |",
+                "| 고객 생성 | POST | email, name | customer_id | Backend Engineer | Day 1 |",
+                "| 피드백 등록 | POST | customer_id, text | feedback_id | Backend Engineer | Day 1 |",
+                "## Proactive Team Activity",
+                "- do now: API 목록과 데이터 모델 후보를 작성한다.",
+                "- ask another team: Product Team에 필수 고객 흐름을 확인한다.",
+                "- escalate: 인증 범위가 불명확하면 CTO Agent에게 올린다.",
+                "- next session: API별 검증 기준을 추가한다.",
+                "## KPI 영향",
+                "- 첫 고객 온보딩 시간 단축과 피드백 수집률 개선에 직접 연결된다.",
+                "- 성공 지표: 필수 API 3개 정의, 오류 케이스 5개 이상 작성.",
+                "## Decision Requests",
+                "- CTO Agent: 인증 방식 후보를 세션 종료 전 선택해야 한다.",
+                "- CPO Agent: MVP에서 제외할 고객 속성을 결정해야 한다.",
+                "## Blockers",
+                "- CPO scope가 확정되지 않으면 데이터 모델 필드가 흔들린다.",
+                "- 해소 조건: 필수 화면 흐름과 고객 속성 목록 수신.",
+                "## 이전 세션 대비 개선",
+                "- 기존에는 작업명만 있었고, 이번에는 API 단위와 owner를 분리했다.",
+                "- 다음에는 에러 응답과 테스트 시나리오를 추가한다.",
+                "## 리스크와 의존성",
+                "- 개인정보 필드가 늘어나면 Legal Agent 검토가 필요하다.",
+                "- 배포 전 Security Team의 권한 검토가 필요하다.",
+                "## 다음 업데이트",
+                "- API별 request/response 초안과 테스트 체크리스트를 제출한다.",
+                "- Product, Security, Legal의 확인 결과를 반영한다.",
+            ]
+        )
+        old_call_llm = run_company.call_llm
+        calls: list[str] = []
+
+        def fake_call_llm(config_arg, system_prompt, user_prompt, semaphore=None):
+            calls.append(user_prompt)
+            if len(calls) == 1:
+                return "완료", None
+            return rich_content, None
+
+        try:
+            run_company.call_llm = fake_call_llm
+            run_company.RUNTIME_DIR.mkdir(exist_ok=True)
+            with tempfile.TemporaryDirectory(dir=run_company.RUNTIME_DIR) as tmp:
+                result = run_company.run_agent(
+                    agent,
+                    [],
+                    "self-test",
+                    config,
+                    True,
+                    run_company.threading.Semaphore(1),
+                    log_dir=Path(tmp) / "logs",
+                    product_dir=Path(tmp) / "products",
+                )
+        finally:
+            run_company.call_llm = old_call_llm
+
+        self.assertEqual(len(calls), 2)
+        self.assertTrue(result["llm_quality_retry"])
+        self.assertEqual(result["state"], "active")
+
     def test_doctor_passes(self):
         with redirect_stdout(StringIO()):
             self.assertEqual(run_company.doctor(), 0)

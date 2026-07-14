@@ -122,7 +122,7 @@ def build_llm_config() -> LLMConfig:
         api_key=api_key,
         timeout_seconds=parse_int(env_value(env, "LLM_TIMEOUT_SECONDS", "30"), 30, minimum=1),
         temperature=parse_float(env_value(env, "LLM_TEMPERATURE", "0.2"), 0.2),
-        max_tokens=parse_int(env_value(env, "LLM_MAX_TOKENS", "700"), 700, minimum=1),
+        max_tokens=parse_int(env_value(env, "LLM_MAX_TOKENS", "2200"), 2200, minimum=1),
         agent_limit=parse_int(env_value(env, "LLM_AGENT_LIMIT", "55"), 55, minimum=0),
         concurrency=parse_int(env_value(env, "LLM_CONCURRENCY", "2"), 2, minimum=1),
     )

@@ -14,6 +14,7 @@ import dataclasses
 import datetime as dt
 import http.server
 import json
+import os
 import queue
 import re
 import socketserver
@@ -48,6 +49,21 @@ GENERATED_TOOLS_DIR = ROOT / "team-tools" / "generated"
 STOP_COMMANDS = {"stop", "quit", "exit", "q"}
 INPUT_QUEUE: queue.Queue[str] | None = None
 INPUT_THREAD_STARTED = False
+MIN_LLM_CONTENT_CHARS = 900
+MIN_LLM_CONTENT_LINES = 18
+MIN_REQUIRED_SECTION_MATCHES = 6
+REQUIRED_WORK_PRODUCT_SECTIONS = [
+    "## 판단",
+    "## 실행 계획",
+    "## 산출물 초안",
+    "## Proactive Team Activity",
+    "## KPI 영향",
+    "## Decision Requests",
+    "## Blockers",
+    "## 이전 세션 대비 개선",
+    "## 리스크와 의존성",
+    "## 다음 업데이트",
+]
 DASHBOARD_RUN_LOCK = threading.Lock()
 DASHBOARD_RUN_THREAD: threading.Thread | None = None
 DASHBOARD_LAST_MESSAGE = "Dashboard server idle."
@@ -1178,7 +1194,8 @@ def build_agent_prompt(agent: AgentRuntime, tasks: list[WorkItem], cycle_id: str
         "You are an autonomous company agent. "
         "Answer in Korean. Be concrete, operational, and concise. "
         "Return Markdown only. Do not invent external facts. "
-        "Focus on the assigned work, risks, dependencies, and next actions."
+        "Focus on the assigned work, risks, dependencies, and next actions. "
+        "Do not answer with one or two lines. Produce a complete work product."
     )
     user_prompt = "\n".join(
         [
@@ -1238,6 +1255,45 @@ def build_agent_prompt(agent: AgentRuntime, tasks: list[WorkItem], cycle_id: str
 
 class LLMConnectionError(RuntimeError):
     """Raised when required LLM output cannot be produced."""
+
+
+def llm_content_quality_issues(content: str) -> list[str]:
+    stripped = content.strip()
+    issues: list[str] = []
+    if len(stripped) < MIN_LLM_CONTENT_CHARS:
+        issues.append(f"too short: {len(stripped)} chars < {MIN_LLM_CONTENT_CHARS}")
+    line_count = len([line for line in stripped.splitlines() if line.strip()])
+    if line_count < MIN_LLM_CONTENT_LINES:
+        issues.append(f"too few substantive lines: {line_count} < {MIN_LLM_CONTENT_LINES}")
+    section_matches = sum(1 for section in REQUIRED_WORK_PRODUCT_SECTIONS if section in stripped)
+    if section_matches < MIN_REQUIRED_SECTION_MATCHES:
+        issues.append(f"missing required sections: {section_matches}/{len(REQUIRED_WORK_PRODUCT_SECTIONS)} present")
+    placeholder_terms = ["예시", "placeholder", "todo", "작성 예정", "나중에 작성"]
+    if any(term.lower() in stripped.lower() for term in placeholder_terms):
+        issues.append("contains placeholder/example language")
+    return issues
+
+
+def build_quality_retry_prompt(user_prompt: str, previous_content: str, issues: list[str]) -> str:
+    return "\n".join(
+        [
+            user_prompt,
+            "",
+            "Previous answer was rejected because it was not a real work product.",
+            "Quality issues:",
+            *[f"- {issue}" for issue in issues],
+            "",
+            "Rewrite the work product now.",
+            "Requirements:",
+            f"- At least {MIN_LLM_CONTENT_CHARS} characters and {MIN_LLM_CONTENT_LINES} substantive lines.",
+            "- Include the requested section headings.",
+            "- Fill each section with concrete tables, bullet lists, decisions, owners, due dates, risks, dependencies, and next actions.",
+            "- Do not provide a meta answer, summary-only answer, or template-only answer.",
+            "",
+            "Rejected answer:",
+            previous_content[:2000],
+        ]
+    )
 
 
 def validate_llm_ready(config: LLMConfig) -> None:
@@ -1394,6 +1450,22 @@ def run_agent(
         raise LLMConnectionError(f"{agent.name} LLM failed: {llm_error}")
     if not llm_content:
         raise LLMConnectionError(f"{agent.name} LLM returned empty content.")
+    quality_issues = llm_content_quality_issues(llm_content)
+    quality_retry_used = False
+    if quality_issues:
+        retry_prompt = build_quality_retry_prompt(user_prompt, llm_content, quality_issues)
+        retry_content, retry_error = call_llm(llm_config, system_prompt, retry_prompt, llm_semaphore)
+        quality_retry_used = True
+        if retry_error:
+            raise LLMConnectionError(f"{agent.name} LLM quality retry failed: {retry_error}")
+        if not retry_content:
+            raise LLMConnectionError(f"{agent.name} LLM quality retry returned empty content.")
+        retry_issues = llm_content_quality_issues(retry_content)
+        if retry_issues:
+            raise LLMConnectionError(
+                f"{agent.name} LLM output too shallow after retry: {'; '.join(retry_issues)}"
+            )
+        llm_content = retry_content
 
     work_product = render_work_product(agent, tasks, cycle_id, llm_content, previous_context=previous_context)
     log_content = render_log(agent, tasks, cycle_id, product_path, log_dir)
@@ -1418,6 +1490,7 @@ def run_agent(
         "recommended_tools": recommendations,
         "log": str(log_path.relative_to(ROOT)),
         "work_product": str(product_path.relative_to(ROOT)),
+        "llm_quality_retry": quality_retry_used,
         "last_heartbeat": now_iso(),
     }
 
